@@ -17,6 +17,7 @@ import { apiRequest, ApiError } from './lib/api';
 import { DeliveriesPage } from './pages/DeliveriesPage';
 import { DeliveryDetailPage } from './pages/DeliveryDetailPage';
 import { OverviewPage } from './pages/OverviewPage';
+import { HelpRequestsPage } from './pages/HelpRequestsPage';
 import type { AdminUser, AppRoute } from './types';
 
 type AuthResponse = { user: AdminUser };
@@ -138,6 +139,18 @@ function Router({
     );
   }
 
+  if (route.page === 'helpRequests') {
+    return (
+      <HelpRequestsPage
+        route={route}
+        onNavigate={navigate}
+        user={user}
+        onLogout={onLogout}
+        loggingOut={loggingOut}
+      />
+    );
+  }
+
   return (
     <OverviewPage
       route={route}
@@ -153,6 +166,7 @@ function parseRoute(pathname: string): AppRoute {
   const deliveryMatch = pathname.match(/^\/deliveries\/(\d+)\/?$/);
   if (deliveryMatch) return { page: 'delivery', jobId: Number(deliveryMatch[1]) };
   if (/^\/deliveries\/?$/.test(pathname)) return { page: 'deliveries' };
+  if (/^\/help-requests\/?$/.test(pathname)) return { page: 'helpRequests' };
   return { page: 'overview' };
 }
 

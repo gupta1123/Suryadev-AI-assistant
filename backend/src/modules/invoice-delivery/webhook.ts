@@ -5,6 +5,7 @@ import { asyncHandler, HttpError } from '../../lib/http.js';
 import { getSupabaseServerClient } from '../../lib/supabase.js';
 import { msg91Timestamp, normalizeMsg91Status } from './msg91-status.js';
 import { applyProviderDeliveryStatus } from './repository.js';
+import { processMsg91InvoiceButtonResponse } from './help-requests.js';
 
 export const msg91WebhookRouter = Router();
 
@@ -78,6 +79,11 @@ msg91WebhookRouter.post(
           payload,
         });
       }
+      await processMsg91InvoiceButtonResponse({
+        payload,
+        providerIntegrationId: provider?.id ?? null,
+        webhookEventId: event.id,
+      });
       await client
         .from('provider_webhook_events')
         .update({ processed_at: new Date().toISOString(), processing_error: null })

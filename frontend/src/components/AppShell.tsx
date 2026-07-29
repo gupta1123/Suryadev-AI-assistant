@@ -1,4 +1,4 @@
-import { FileText, LayoutDashboard, LogOut, Send } from 'lucide-react';
+import { FileText, LayoutDashboard, LifeBuoy, LogOut, Send } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { AdminUser, AppRoute, DeliveryConfig } from '../types';
 
@@ -33,6 +33,7 @@ export function AppShell({
 }) {
   const overviewActive = route.page === 'overview';
   const deliveriesActive = route.page === 'deliveries' || route.page === 'delivery';
+  const helpRequestsActive = route.page === 'helpRequests';
   const environmentReady = config?.invoiceSource === 'sap'
     ? config.sapPollingReady
     : config?.simulationReady;
@@ -53,6 +54,10 @@ export function AppShell({
           <button className={`nav-link ${deliveriesActive ? 'nav-link--active' : ''}`} type="button" onClick={() => onNavigate('/deliveries')}>
             <FileText size={18} aria-hidden="true" />
             Deliveries
+          </button>
+          <button className={`nav-link ${helpRequestsActive ? 'nav-link--active' : ''}`} type="button" onClick={() => onNavigate('/help-requests')}>
+            <LifeBuoy size={18} aria-hidden="true" />
+            Help requests
           </button>
         </nav>
 
@@ -85,12 +90,15 @@ export function AppShell({
         {children}
       </main>
 
-      <nav className={`mobile-nav ${onNewDelivery ? '' : 'mobile-nav--two'}`} aria-label="Mobile navigation">
+      <nav className={`mobile-nav ${onNewDelivery ? 'mobile-nav--four' : ''}`} aria-label="Mobile navigation">
         <button className={overviewActive ? 'mobile-nav--active' : ''} type="button" onClick={() => onNavigate('/')}>
           <LayoutDashboard size={19} aria-hidden="true" /> Overview
         </button>
         <button className={deliveriesActive ? 'mobile-nav--active' : ''} type="button" onClick={() => onNavigate('/deliveries')}>
           <FileText size={19} aria-hidden="true" /> Deliveries
+        </button>
+        <button className={helpRequestsActive ? 'mobile-nav--active' : ''} type="button" onClick={() => onNavigate('/help-requests')}>
+          <LifeBuoy size={19} aria-hidden="true" /> Help
         </button>
         {onNewDelivery && (
           <button type="button" onClick={onNewDelivery}>

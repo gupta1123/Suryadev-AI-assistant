@@ -263,10 +263,35 @@ export type SimulationResult = {
   pdfFileName: string;
 };
 
+export type HelpRequestStatus = 'open' | 'in_progress' | 'resolved';
+
+export type HelpRequest = {
+  id: number;
+  status: HelpRequestStatus;
+  requestedAt: string;
+  resolvedAt: string | null;
+  customer: {
+    id: number;
+    name: string;
+    sapCustomerNumber: string | null;
+  } | null;
+  invoice: {
+    id: number;
+    billingDocument: string;
+    billingDocumentDate: string;
+    currency: string;
+    totalGrossAmount: number | null;
+  } | null;
+  communicationJobId: number | null;
+  inboundMessageId: number | null;
+  buttonText: string;
+};
+
 export type AppRoute =
   | { page: 'overview' }
   | { page: 'deliveries' }
-  | { page: 'delivery'; jobId: number };
+  | { page: 'delivery'; jobId: number }
+  | { page: 'helpRequests' };
 
 export function relationOne<T>(value: T | T[] | undefined): T | undefined {
   return Array.isArray(value) ? value[0] : value;

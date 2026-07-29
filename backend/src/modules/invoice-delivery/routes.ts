@@ -27,6 +27,10 @@ import {
 import { InvoiceSimulator } from './simulator.js';
 import { pollSapInvoices } from './sap-poller.js';
 import { processDeliveryQueue } from './worker.js';
+import {
+  listInvoiceHelpRequests,
+  updateInvoiceHelpRequestStatus,
+} from './help-requests.js';
 
 const previewSchema = z.object({
   fixtureId: z.string().min(1),
@@ -39,6 +43,10 @@ const listSchema = z.object({
 });
 
 const jobIdSchema = z.coerce.number().int().positive();
+const helpRequestIdSchema = z.coerce.number().int().positive();
+const helpRequestStatusSchema = z.object({
+  status: z.enum(['open', 'in_progress', 'resolved']),
+});
 const source = getInvoiceSource();
 const simulator = new InvoiceSimulator();
 
@@ -222,6 +230,23 @@ invoiceDeliveryRouter.get(
       return;
     }
     response.json({ data: await listDeliveryJobs(input.limit, input.beforeId) });
+  }),
+);
+
+invoiceDeliveryRouter.get(
+  '/help-requests',
+  asyncHandler(async (_request, response) => {
+    response.json({ data: await listInvoiceHelpRequests() });
+  }),
+);
+
+invoiceDeliveryRouter.patch(
+  '/help-requests/:helpRequestId',
+  asyncHandler(async (request, response) => {
+    const id = helpRequestIdSchema.parse(request.params.helpRequestId);
+    const { status } = helpRequestStatusSchema.parse(request.body);
+    await updateInvoiceHelpRequestStatus(id, status);
+    response.json({ data: { id, status } });
   }),
 );
 
