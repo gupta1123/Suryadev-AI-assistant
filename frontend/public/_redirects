@@ -1,0 +1,2 @@
+/api/*  https://suryadevaiagent-1ee044c09d04.herokuapp.com/api/:splat  200
+/*       /index.html                                                   200

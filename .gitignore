@@ -17,3 +17,6 @@ coverage/
 # Supabase local state
 supabase/.branches/
 supabase/.temp/
+
+# Local Netlify folder
+.netlify
