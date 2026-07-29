@@ -76,7 +76,7 @@ export function DeliveryDetailPage({
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     const messageStatus = job?.messages?.[0]?.status;
-    if (!job || ['read', 'failed', 'cancelled'].includes(messageStatus ?? job.status)) return;
+    if (!job || ['delivered', 'read', 'failed', 'cancelled'].includes(messageStatus ?? job.status)) return;
     const interval = window.setInterval(() => void load(true), 2500);
     return () => window.clearInterval(interval);
   }, [job, load]);
@@ -101,7 +101,8 @@ export function DeliveryDetailPage({
   const latestAttempt = message?.message_attempts?.at(-1);
   const variables = useMemo(() => readTemplateVariables(latestAttempt), [latestAttempt]);
   const document = job?.invoice_documents?.find((item) => item.is_current) ?? job?.invoice_documents?.[0];
-  const currentStatus = message?.status ?? job?.status ?? 'loading';
+  const rawStatus = message?.status ?? job?.status ?? 'loading';
+  const currentStatus = rawStatus === 'read' ? 'delivered' : rawStatus;
 
   // Format status title & date
   const statusInfo = getStatusBannerText(currentStatus, message, job);
@@ -210,8 +211,8 @@ export function DeliveryDetailPage({
                   <p>Thank you,<br />Team {variables.var_5 ?? 'SuryaDev'}</p>
 
                   <div className="whatsapp-bubble-footer">
-                    <span>{formatTimeOnly(message?.read_at ?? message?.delivered_at ?? message?.sent_at ?? job.created_at)}</span>
-                    <span className="whatsapp-checks">✓✓</span>
+                    <span>{formatTimeOnly(message?.delivered_at ?? message?.sent_at ?? job.created_at)}</span>
+                    <span className="whatsapp-checks">{isDelivered(message) ? '✓✓' : '✓'}</span>
                   </div>
                 </div>
 
@@ -324,19 +325,12 @@ function preserveDocumentUrls(
 
 function HorizontalTimeline({ message, job }: { message?: DeliveryMessage; job: DeliveryJobDetail }) {
   const isSent = Boolean(message?.sent_at || job.created_at);
-  const isDelivered = Boolean(message?.delivered_at || message?.read_at);
-  const isRead = Boolean(message?.read_at);
-
-  // Calculate progress bar percentage
-  let progressPct = 0;
-  if (isRead) progressPct = 100;
-  else if (isDelivered) progressPct = 50;
-  else if (isSent) progressPct = 0;
+  const delivered = isDelivered(message);
 
   return (
     <div className="horizontal-timeline">
       <div className="horizontal-timeline-line">
-        <div className="horizontal-timeline-progress" style={{ width: `${progressPct}%` }} />
+        <div className="horizontal-timeline-progress" style={{ width: delivered ? '100%' : '0%' }} />
       </div>
 
       <div className={`timeline-step ${isSent ? 'timeline-step--active' : ''}`}>
@@ -347,32 +341,26 @@ function HorizontalTimeline({ message, job }: { message?: DeliveryMessage; job: 
         <span className="timeline-step-time">{formatDateTimeCompact(message?.sent_at ?? job.created_at)}</span>
       </div>
 
-      <div className={`timeline-step ${isDelivered ? 'timeline-step--active' : ''}`}>
+      <div className={`timeline-step ${delivered ? 'timeline-step--active' : ''}`}>
         <div className="timeline-step-circle">
           <Check size={14} strokeWidth={3} />
         </div>
         <span className="timeline-step-label">Delivered</span>
         <span className="timeline-step-time">{formatDateTimeCompact(message?.delivered_at)}</span>
       </div>
-
-      <div className={`timeline-step ${isRead ? 'timeline-step--active' : ''}`}>
-        <div className="timeline-step-circle">
-          <Check size={14} strokeWidth={3} />
-        </div>
-        <span className="timeline-step-label">Read</span>
-        <span className="timeline-step-time">{formatDateTimeCompact(message?.read_at)}</span>
-      </div>
     </div>
   );
 }
 
+function isDelivered(message?: DeliveryMessage): boolean {
+  return Boolean(message?.delivered_at || message?.status === 'delivered' || message?.status === 'read');
+}
+
 function getStatusBannerText(status: string, message?: DeliveryMessage, job?: DeliveryJobDetail | null) {
-  const time = message?.read_at ?? message?.delivered_at ?? message?.sent_at ?? job?.created_at;
+  const time = message?.delivered_at ?? message?.sent_at ?? job?.created_at;
   const formattedTime = time ? formatDateTime(time) : '29 Jul 2026, 11:42 AM';
 
   switch (status) {
-    case 'read':
-      return { title: 'Read by customer', timestamp: formattedTime };
     case 'delivered':
       return { title: 'Delivered to customer', timestamp: formattedTime };
     case 'sent':

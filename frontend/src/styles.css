@@ -579,8 +579,8 @@ input:focus, select:focus { border-color: #ea580c; box-shadow: 0 0 0 3px rgb(234
 .horizontal-timeline-line {
   position: absolute;
   top: 33px;
-  left: 15%;
-  right: 15%;
+  left: 25%;
+  right: 25%;
   height: 2px;
   background: #e4e4e7;
   z-index: 1;
@@ -672,4 +672,3 @@ input:focus, select:focus { border-color: #ea580c; box-shadow: 0 0 0 3px rgb(234
   background: #22c55e;
   box-shadow: 0 0 0 3px rgb(34 197 94 / 22%);
 }
-
