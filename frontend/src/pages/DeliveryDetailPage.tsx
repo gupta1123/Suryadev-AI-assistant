@@ -2,15 +2,10 @@ import {
   ArrowLeft,
   CalendarDays,
   Check,
-  CheckCircle2,
   Download,
-  FileText,
   MessageCircle,
-  Minus,
-  Plus,
   RefreshCw,
   RotateCcw,
-  Sun,
   UserRound,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -54,7 +49,6 @@ export function DeliveryDetailPage({
   const [refreshing, setRefreshing] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState('');
-  const [zoomLevel, setZoomLevel] = useState(100);
 
   const load = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true);
@@ -106,11 +100,6 @@ export function DeliveryDetailPage({
 
   // Format status title & date
   const statusInfo = getStatusBannerText(currentStatus, message, job);
-
-  // Zoom handlers
-  const handleZoomIn = () => setZoomLevel((prev) => Math.min(prev + 15, 150));
-  const handleZoomOut = () => setZoomLevel((prev) => Math.max(prev - 15, 70));
-  const handleZoomReset = () => setZoomLevel(100);
 
   return (
     <AppShell
@@ -264,144 +253,36 @@ export function DeliveryDetailPage({
             {/* Right Column: Invoice Document Preview */}
             <div className="invoice-preview-card">
               <div className="invoice-preview-header">
-                <h2>Invoice preview</h2>
-                <div className="zoom-controls">
-                  <button className="zoom-button" type="button" onClick={handleZoomOut} title="Zoom out">-</button>
-                  <span className="zoom-level" onClick={handleZoomReset} style={{ cursor: 'pointer' }}>{zoomLevel}%</span>
-                  <button className="zoom-button" type="button" onClick={handleZoomIn} title="Zoom in">+</button>
+                <div>
+                  <h2>Invoice preview</h2>
+                  <p>The exact PDF sent to the customer</p>
+                </div>
+                <div className="invoice-preview-actions">
+                  {document?.preview_url && (
+                    <a className="button button--secondary button--compact" href={document.preview_url} target="_blank" rel="noreferrer">
+                      Open full screen
+                    </a>
+                  )}
                   {document?.download_url && (
-                    <a className="zoom-button" href={document.download_url} target="_blank" rel="noreferrer" title="Download PDF">
-                      <Download size={14} />
+                    <a className="button button--secondary button--compact" href={document.download_url} target="_blank" rel="noreferrer">
+                      <Download size={14} aria-hidden="true" /> Download
                     </a>
                   )}
                 </div>
               </div>
 
-              <div className="invoice-sheet-container">
-                <div
-                  className="tax-invoice-sheet"
-                  style={{
-                    transform: `scale(${zoomLevel / 100})`,
-                    transformOrigin: 'top left',
-                    width: zoomLevel > 100 ? `${100 * (100 / zoomLevel)}%` : '100%',
-                  }}
-                >
-                  {/* Company Top Bar */}
-                  <div className="invoice-top-bar">
-                    <div className="company-brand-header">
-                      <Sun className="sun-logo-svg" />
-                      <div>
-                        <strong>SuryaDev</strong>
-                        <small>Steel Company</small>
-                      </div>
-                    </div>
-
-                    <div className="invoice-meta-top">
-                      <h3>TAX INVOICE</h3>
-                      <p><strong>Invoice No.:</strong> {invoice?.sap_billing_document ?? '26SG00010'}</p>
-                      <p><strong>Invoice Date:</strong> {formatDate(invoice?.billing_document_date)}</p>
-                    </div>
-                  </div>
-
-                  {/* Address Grid */}
-                  <div className="addresses-grid">
-                    <div className="address-box">
-                      <h4>SuryaDev Steel Company</h4>
-                      <p>123 Industrial Area, GIDC Estate</p>
-                      <p>Raipur, Chhattisgarh 492001</p>
-                      <p>India</p>
-                      <p><strong>GSTIN:</strong> 22AAAAA0000A1Z5</p>
-                    </div>
-
-                    <div className="address-box">
-                      <h4>Bill To</h4>
-                      <p><strong>{customer?.display_name ?? 'Sri Praveen Enterprises'}</strong></p>
-                      <p>45, Industrial Estate, Road No. 3</p>
-                      <p>Raipur, Chhattisgarh 492013</p>
-                      <p>India</p>
-                      <p><strong>GSTIN:</strong> 22BBBBB1111B1Z7</p>
-                    </div>
-                  </div>
-
-                  {/* Items Table */}
-                  <table className="invoice-items-table">
-                    <thead>
-                      <tr>
-                        <th style={{ width: '40px' }}>#</th>
-                        <th>Description</th>
-                        <th style={{ textAlign: 'center' }}>Unit</th>
-                        <th style={{ textAlign: 'right' }}>Quantity</th>
-                        <th style={{ textAlign: 'right' }}>Rate (₹)</th>
-                        <th style={{ textAlign: 'right' }}>Amount (₹)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {job.invoice_items && job.invoice_items.length > 0 ? (
-                        job.invoice_items.map((item, idx) => (
-                          <tr key={item.id}>
-                            <td>{idx + 1}</td>
-                            <td>{item.description ?? item.product_id ?? 'Fly Ash'}</td>
-                            <td style={{ textAlign: 'center' }}>{item.quantity_unit ?? 'TO'}</td>
-                            <td style={{ textAlign: 'right' }}>{Number(item.quantity ?? 1).toFixed(3)}</td>
-                            <td style={{ textAlign: 'right' }}>{Number(item.net_amount ?? 236).toFixed(2)}</td>
-                            <td style={{ textAlign: 'right' }}>{Number(item.net_amount ?? 236).toFixed(2)}</td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td>1</td>
-                          <td>Fly Ash</td>
-                          <td style={{ textAlign: 'center' }}>TO</td>
-                          <td style={{ textAlign: 'right' }}>1.000</td>
-                          <td style={{ textAlign: 'right' }}>{Number(invoice?.total_net_amount ?? 236).toFixed(2)}</td>
-                          <td style={{ textAlign: 'right' }}>{Number(invoice?.total_net_amount ?? 236).toFixed(2)}</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-
-                  {/* Totals Summary */}
-                  <div className="invoice-totals-block">
-                    <div className="total-row">
-                      <span>Subtotal</span>
-                      <span>{Number(invoice?.total_net_amount ?? 236).toFixed(2)}</span>
-                    </div>
-                    <div className="total-row">
-                      <span>CGST (0%)</span>
-                      <span>0.00</span>
-                    </div>
-                    <div className="total-row">
-                      <span>SGST (0%)</span>
-                      <span>0.00</span>
-                    </div>
-                    <div className="total-row total-row--grand">
-                      <span>Total</span>
-                      <span>₹{Number(invoice?.total_gross_amount ?? 236).toFixed(2)}</span>
-                    </div>
-                  </div>
-
-                  {/* Amount in words */}
-                  <div className="amount-in-words">
-                    Amount in words: <span>Two Hundred Thirty Six Rupees Only</span>
-                  </div>
-
-                  {/* Footer Terms & Signatory */}
-                  <div className="invoice-footer-grid">
-                    <div className="terms-block">
-                      <h5>Terms & Conditions</h5>
-                      <ol>
-                        <li>Goods once sold will not be taken back.</li>
-                        <li>Subject to Raipur jurisdiction only.</li>
-                      </ol>
-                    </div>
-
-                    <div className="signature-block">
-                      <strong>Authorized Signatory</strong>
-                      <span className="signature-img">Anuj Kumar</span>
-                    </div>
-                  </div>
+              {document?.preview_url ? (
+                <iframe
+                  className="invoice-pdf-frame"
+                  src={`${document.preview_url}#toolbar=1&navpanes=0&view=FitH`}
+                  title={`Invoice ${invoice?.sap_billing_document ?? jobId}`}
+                />
+              ) : (
+                <div className="invoice-preview-unavailable">
+                  <strong>Preview unavailable</strong>
+                  <p>The invoice PDF could not be loaded. You can still use the download button if it is available.</p>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         </>

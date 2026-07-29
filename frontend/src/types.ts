@@ -246,6 +246,7 @@ export type DeliveryJobDetail = Omit<DeliveryJob, 'messages'> & {
     size_bytes?: number | null;
     is_current: boolean;
     created_at: string;
+    preview_url?: string | null;
     download_url?: string | null;
   }>;
 };

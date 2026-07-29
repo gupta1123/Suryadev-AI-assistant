@@ -228,14 +228,17 @@ export async function getDeliveryJob(jobId: number): Promise<Record<string, unkn
 
   const documents = await Promise.all(
     (documentsResult.data ?? []).map(async (document) => {
-      const { data } = await client.storage
-        .from(document.storage_bucket)
-        .createSignedUrl(document.storage_path, 3600, {
+      const storage = client.storage.from(document.storage_bucket);
+      const [previewResult, downloadResult] = await Promise.all([
+        storage.createSignedUrl(document.storage_path, 3600),
+        storage.createSignedUrl(document.storage_path, 3600, {
           download: document.file_name ?? `invoice-${invoiceId}.pdf`,
-        });
+        }),
+      ]);
       return {
         ...document,
-        download_url: data?.signedUrl ?? null,
+        preview_url: previewResult.data?.signedUrl ?? null,
+        download_url: downloadResult.data?.signedUrl ?? null,
       };
     }),
   );
