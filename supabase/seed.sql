@@ -1,0 +1,1 @@
+-- Add deterministic local-development seed data after the domain schema is agreed.

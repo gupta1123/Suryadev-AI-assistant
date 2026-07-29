@@ -1,0 +1,26 @@
+{
+  "name": "suryadev-ai-agents",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "concurrently -n frontend,backend -c cyan,magenta \"npm run dev -w frontend\" \"npm run dev -w backend\"",
+    "build": "npm run build -w backend && npm run build -w frontend",
+    "typecheck": "npm run typecheck -w backend && npm run typecheck -w frontend",
+    "test": "npm test -w backend",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:status": "supabase status",
+    "supabase:push": "supabase db push"
+  },
+  "devDependencies": {
+    "concurrently": "latest",
+    "supabase": "latest"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

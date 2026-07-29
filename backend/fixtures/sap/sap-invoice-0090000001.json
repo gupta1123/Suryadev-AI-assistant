@@ -1,0 +1,102 @@
+{
+  "fixtureId": "sap-invoice-0090000001",
+  "label": "Test invoice 0090000001 — Sunrise Engineering",
+  "responses": {
+    "billingDocument": {
+      "d": {
+        "results": [
+          {
+            "__metadata": {
+              "type": "API_BILLING_DOCUMENT_SRV.A_BillingDocumentType"
+            },
+            "BillingDocument": "0090000001",
+            "BillingDocumentType": "F2",
+            "BillingDocumentCategory": "M",
+            "BillingDocumentDate": "/Date(1785196800000)/",
+            "CreationDateTime": "2026-07-28T09:30:00Z",
+            "LastChangeDateTime": "2026-07-28T09:31:12Z",
+            "SoldToParty": "1000001",
+            "PayerParty": "1000001",
+            "SalesOrganization": "1000",
+            "DistributionChannel": "10",
+            "Division": "00",
+            "TransactionCurrency": "INR",
+            "TotalNetAmount": "11010.17",
+            "TotalTaxAmount": "1981.83",
+            "TotalGrossAmount": "12992.00",
+            "AccountingPostingStatus": "C",
+            "OverallBillingStatus": "C",
+            "CancelledBillingDocument": ""
+          }
+        ]
+      }
+    },
+    "billingDocumentItems": {
+      "d": {
+        "results": [
+          {
+            "BillingDocument": "0090000001",
+            "BillingDocumentItem": "000010",
+            "Material": "STEEL-TMT-12MM",
+            "BillingDocumentItemText": "TMT Steel Bar 12 mm",
+            "BillingQuantity": "1.500",
+            "BillingQuantityUnit": "TO",
+            "NetAmount": "11010.17",
+            "TaxAmount": "1981.83",
+            "TransactionCurrency": "INR"
+          }
+        ]
+      }
+    },
+    "billingDocumentPartners": {
+      "d": {
+        "results": [
+          {
+            "BillingDocument": "0090000001",
+            "PartnerFunction": "AG",
+            "Customer": "1000001"
+          },
+          {
+            "BillingDocument": "0090000001",
+            "PartnerFunction": "RG",
+            "Customer": "1000001"
+          }
+        ]
+      }
+    },
+    "businessPartner": {
+      "d": {
+        "results": [
+          {
+            "BusinessPartner": "1000001",
+            "Customer": "1000001",
+            "BusinessPartnerFullName": "Sunrise Engineering Pvt Ltd",
+            "OrganizationBPName1": "Sunrise Engineering Pvt Ltd",
+            "Country": "IN",
+            "Language": "EN"
+          }
+        ]
+      }
+    },
+    "phoneNumbers": {
+      "d": {
+        "results": [
+          {
+            "BusinessPartner": "1000001",
+            "PhoneNumber": "+91 98765 43210",
+            "Country": "IN",
+            "IsDefaultPhoneNumber": true
+          }
+        ]
+      }
+    },
+    "getPdf": {
+      "d": {
+        "BillingDocument": "0090000001",
+        "FileName": "TEST-Invoice-0090000001.pdf",
+        "MimeType": "application/pdf",
+        "BillingDocumentBinary": "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA0IDAgUiA+PiA+PiAvQ29udGVudHMgNSAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhID4+CmVuZG9iago1IDAgb2JqCjw8IC9MZW5ndGggMjM1ID4+CnN0cmVhbQpCVAovRjEgMjIgVGYKNzIgNzEwIFRkCihTVVJZQURFViBURVNUIElOVk9JQ0UpIFRqCi9GMSAxMiBUZgowIC0zNiBUZAooSW52b2ljZTogMDA5MDAwMDAwMSkgVGoKMCAtMjIgVGQKKEN1c3RvbWVyOiBTdW5yaXNlIEVuZ2luZWVyaW5nIFB2dCBMdGQpIFRqCjAgLTIyIFRkCihBbW91bnQ6IElOUiAxMjk5Mi4wMCkgVGoKMCAtMzYgVGQKKFRFU1QgREFUQSAtIE5PVCBBIENPTU1FUkNJQUwgRE9DVU1FTlQpIFRqCkVUCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDAzMTEgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgo1OTcKJSVFT0YK"
+      }
+    }
+  }
+}

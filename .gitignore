@@ -1,0 +1,19 @@
+node_modules/
+dist/
+.DS_Store
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Logs and local tooling
+*.log
+.vite/
+coverage/
+*.tsbuildinfo
+.artifacts/
+
+# Supabase local state
+supabase/.branches/
+supabase/.temp/
