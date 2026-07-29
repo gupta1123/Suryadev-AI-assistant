@@ -53,12 +53,17 @@ export function DeliveryDetailPage({
   const load = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true);
     try {
-      const [nextConfig, nextJob] = await Promise.all([
-        apiRequest<DeliveryConfig>('/invoice-delivery/config'),
-        apiRequest<DeliveryJobDetail>(`/invoice-delivery/jobs/${jobId}`),
-      ]);
-      setConfig(nextConfig);
-      setJob(nextJob);
+      if (silent) {
+        const nextJob = await apiRequest<DeliveryJobDetail>(`/invoice-delivery/jobs/${jobId}`);
+        setJob((currentJob) => preserveDocumentUrls(currentJob, nextJob));
+      } else {
+        const [nextConfig, nextJob] = await Promise.all([
+          apiRequest<DeliveryConfig>('/invoice-delivery/config'),
+          apiRequest<DeliveryJobDetail>(`/invoice-delivery/jobs/${jobId}`),
+        ]);
+        setConfig(nextConfig);
+        setJob(nextJob);
+      }
       setError('');
     } catch (loadError) {
       setError(toMessage(loadError));
@@ -289,6 +294,32 @@ export function DeliveryDetailPage({
       )}
     </AppShell>
   );
+}
+
+function preserveDocumentUrls(
+  currentJob: DeliveryJobDetail | null,
+  nextJob: DeliveryJobDetail,
+): DeliveryJobDetail {
+  if (!currentJob?.invoice_documents?.length || !nextJob.invoice_documents?.length) {
+    return nextJob;
+  }
+
+  const currentDocuments = new Map(
+    currentJob.invoice_documents.map((document) => [document.id, document]),
+  );
+
+  return {
+    ...nextJob,
+    invoice_documents: nextJob.invoice_documents.map((document) => {
+      const currentDocument = currentDocuments.get(document.id);
+      if (!currentDocument) return document;
+      return {
+        ...document,
+        preview_url: currentDocument.preview_url ?? document.preview_url,
+        download_url: currentDocument.download_url ?? document.download_url,
+      };
+    }),
+  };
 }
 
 function HorizontalTimeline({ message, job }: { message?: DeliveryMessage; job: DeliveryJobDetail }) {
