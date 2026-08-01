@@ -43,7 +43,7 @@ Password: admin
 
 Configure them in `backend/.env` with `ADMIN_USERNAME` and `ADMIN_PASSWORD`.
 Change the password before deploying the application. `AUTH_SESSION_HOURS`
-controls the session lifetime and defaults to eight hours.
+controls the session lifetime and defaults to 24 hours.
 
 Successful login creates an opaque, HTTP-only, same-site cookie. The backend
 validates that cookie on every invoice-delivery API call, restores the session

@@ -13,27 +13,54 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import logoImg from './assets/suryadev-logo.jpg';
-import { apiRequest, ApiError } from './lib/api';
+import { apiRequest, ApiError, AUTH_UNAUTHORIZED_EVENT } from './lib/api';
 import { DeliveriesPage } from './pages/DeliveriesPage';
 import { DeliveryDetailPage } from './pages/DeliveryDetailPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { HelpRequestsPage } from './pages/HelpRequestsPage';
 import type { AdminUser, AppRoute } from './types';
 
-type AuthResponse = { user: AdminUser };
+type AuthResponse = { user: AdminUser; expiresAt: string };
 
 export default function App() {
   const [user, setUser] = useState<AdminUser | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [authIssue, setAuthIssue] = useState('');
   const [loggingOut, setLoggingOut] = useState(false);
+  const [sessionExpiresAt, setSessionExpiresAt] = useState<number | null>(null);
+
+  const expireSession = useCallback(() => {
+    setUser(null);
+    setSessionExpiresAt(null);
+    setLoggingOut(false);
+    setAuthIssue('Your session expired. Please sign in again.');
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener(AUTH_UNAUTHORIZED_EVENT, expireSession);
+    return () => window.removeEventListener(AUTH_UNAUTHORIZED_EVENT, expireSession);
+  }, [expireSession]);
+
+  useEffect(() => {
+    if (sessionExpiresAt === null) return;
+    const remainingMs = sessionExpiresAt - Date.now();
+    if (remainingMs <= 0) {
+      expireSession();
+      return;
+    }
+    const timeout = window.setTimeout(expireSession, remainingMs);
+    return () => window.clearTimeout(timeout);
+  }, [expireSession, sessionExpiresAt]);
 
   useEffect(() => {
     let active = true;
     void (async () => {
       try {
         const data = await apiRequest<AuthResponse>('/auth/session');
-        if (active) setUser(data.user);
+        if (active) {
+          setUser(data.user);
+          setSessionExpiresAt(Date.parse(data.expiresAt));
+        }
       } catch (error) {
         if (active && !(error instanceof ApiError && error.status === 401)) {
           setAuthIssue(error instanceof Error ? error.message : 'Authentication check failed');
@@ -51,6 +78,7 @@ export default function App() {
       body: JSON.stringify({ username, password }),
     });
     setUser(data.user);
+    setSessionExpiresAt(Date.parse(data.expiresAt));
     setAuthIssue('');
   }
 
@@ -60,6 +88,7 @@ export default function App() {
       await apiRequest('/auth/logout', { method: 'POST' });
     } finally {
       setUser(null);
+      setSessionExpiresAt(null);
       setLoggingOut(false);
     }
   }

@@ -26,6 +26,7 @@ describe('local administrator session', () => {
     const { token, session } = createAdminSession(now);
 
     assert.notEqual(token, env.ADMIN_PASSWORD);
+    assert.equal(session.expiresAt, now + (24 * 60 * 60 * 1000));
     assert.equal(getAdminSession(token, now)?.user.username, env.ADMIN_USERNAME);
     assert.equal(getAdminSession(token, session.expiresAt), null);
 
@@ -39,6 +40,7 @@ describe('local administrator session', () => {
     assert.match(cookie, new RegExp(`^${SESSION_COOKIE_NAME}=opaque-token;`));
     assert.match(cookie, /HttpOnly/);
     assert.match(cookie, /SameSite=Strict/);
+    assert.match(cookie, /Max-Age=86400/);
     assert.equal(readSessionToken(`other=value; ${cookie}`), 'opaque-token');
     assert.match(clearSessionCookie(), /Max-Age=0/);
   });

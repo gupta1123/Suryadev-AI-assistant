@@ -12,6 +12,7 @@ export type AuthenticatedRequest = Request & {
     userId: string;
     mode: 'local-admin';
     user: AdminUser;
+    expiresAt: number;
   };
 };
 
@@ -30,6 +31,7 @@ export function requireAdmin(
       userId: session.user.id,
       mode: 'local-admin',
       user: session.user,
+      expiresAt: session.expiresAt,
     };
     next();
   } catch (error) {

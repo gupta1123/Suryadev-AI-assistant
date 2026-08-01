@@ -1,5 +1,7 @@
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
+export const AUTH_UNAUTHORIZED_EVENT = 'auth:unauthorized';
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -33,7 +35,7 @@ export async function apiRequest<T>(
       ? body.details.map((item) => (item as { label?: string }).label).filter(Boolean).join(', ')
       : '';
     if (response.status === 401 && !path.startsWith('/auth/')) {
-      window.dispatchEvent(new Event('auth:unauthorized'));
+      window.dispatchEvent(new Event(AUTH_UNAUTHORIZED_EVENT));
     }
     throw new ApiError(
       [body.error ?? `Request failed (${response.status})`, detail].filter(Boolean).join(': '),

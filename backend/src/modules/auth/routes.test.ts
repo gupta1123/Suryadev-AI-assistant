@@ -59,8 +59,11 @@ describe('administrator authentication routes', () => {
       headers: { cookie },
     });
     assert.equal(sessionResponse.status, 200);
-    const sessionBody = await sessionResponse.json() as { data: { user: { role: string } } };
+    const sessionBody = await sessionResponse.json() as {
+      data: { user: { role: string }; expiresAt: string };
+    };
     assert.equal(sessionBody.data.user.role, 'admin');
+    assert.ok(Number.isFinite(Date.parse(sessionBody.data.expiresAt)));
 
     const protectedResponse = await fetch(`${baseUrl}/invoice-delivery/config`, {
       headers: { cookie },

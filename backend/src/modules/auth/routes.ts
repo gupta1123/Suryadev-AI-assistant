@@ -55,7 +55,12 @@ authRouter.post(
     const { token, session } = createAdminSession();
     response.setHeader('Set-Cookie', createSessionCookie(token));
     request.log.info({ event: 'admin_login_succeeded', ip: attemptKey }, 'Admin login succeeded');
-    response.json({ data: { user: session.user } });
+    response.json({
+      data: {
+        user: session.user,
+        expiresAt: new Date(session.expiresAt).toISOString(),
+      },
+    });
   }),
 );
 
@@ -63,7 +68,12 @@ authRouter.get(
   '/session',
   requireAdmin,
   (request: AuthenticatedRequest, response) => {
-    response.json({ data: { user: request.auth?.user } });
+    response.json({
+      data: {
+        user: request.auth?.user,
+        expiresAt: new Date(request.auth!.expiresAt).toISOString(),
+      },
+    });
   },
 );
 
