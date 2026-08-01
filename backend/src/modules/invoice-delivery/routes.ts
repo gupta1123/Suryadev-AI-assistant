@@ -21,6 +21,7 @@ import {
   getDeliveryJob,
   getSapPollingStatus,
   listDeliveryJobs,
+  listDeliveryJobsPage,
   persistInvoiceAndEnqueue,
   retryDeliveryJob,
 } from './repository.js';
@@ -29,6 +30,7 @@ import { pollSapInvoices } from './sap-poller.js';
 import { processDeliveryQueue } from './worker.js';
 import {
   listInvoiceHelpRequests,
+  listInvoiceHelpRequestsPage,
   updateInvoiceHelpRequestStatus,
 } from './help-requests.js';
 
@@ -40,6 +42,14 @@ const previewSchema = z.object({
 const listSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
   beforeId: z.coerce.number().int().positive().optional(),
+  paginated: z.literal('true').optional(),
+});
+
+const helpRequestListSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(10),
+  beforeId: z.coerce.number().int().positive().optional(),
+  status: z.enum(['open', 'in_progress', 'resolved']).optional(),
+  paginated: z.literal('true').optional(),
 });
 
 const jobIdSchema = z.coerce.number().int().positive();
@@ -229,14 +239,23 @@ invoiceDeliveryRouter.get(
       response.json({ data: [] });
       return;
     }
-    response.json({ data: await listDeliveryJobs(input.limit, input.beforeId) });
+    response.json({
+      data: input.paginated
+        ? await listDeliveryJobsPage(input.limit, input.beforeId)
+        : await listDeliveryJobs(input.limit, input.beforeId),
+    });
   }),
 );
 
 invoiceDeliveryRouter.get(
   '/help-requests',
-  asyncHandler(async (_request, response) => {
-    response.json({ data: await listInvoiceHelpRequests() });
+  asyncHandler(async (request, response) => {
+    const input = helpRequestListSchema.parse(request.query);
+    response.json({
+      data: input.paginated
+        ? await listInvoiceHelpRequestsPage(input)
+        : await listInvoiceHelpRequests(input.status),
+    });
   }),
 );
 

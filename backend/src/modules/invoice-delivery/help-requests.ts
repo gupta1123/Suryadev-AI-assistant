@@ -36,6 +36,14 @@ export type InvoiceHelpRequest = {
   buttonText: string;
 };
 
+export type HelpRequestCounts = Record<'all' | HelpRequestStatus, number>;
+
+export type InvoiceHelpRequestPage = {
+  items: InvoiceHelpRequest[];
+  nextCursor: number | null;
+  counts: HelpRequestCounts;
+};
+
 export function parseMsg91InvoiceButtonResponse(
   payload: Record<string, unknown>,
   now = new Date(),
@@ -195,8 +203,13 @@ export async function processMsg91InvoiceButtonResponse(input: {
   return { matched: true, responseType: parsed.responseType, helpRequestId: task.id };
 }
 
-export async function listInvoiceHelpRequests(status?: HelpRequestStatus): Promise<InvoiceHelpRequest[]> {
+export async function listInvoiceHelpRequestsPage(input: {
+  limit?: number;
+  beforeId?: number;
+  status?: HelpRequestStatus;
+} = {}): Promise<InvoiceHelpRequestPage> {
   const client = getSupabaseServerClient();
+  const pageSize = Math.min(Math.max(input.limit ?? 10, 1), 100);
   let query = client
     .from('review_tasks')
     .select(
@@ -204,12 +217,36 @@ export async function listInvoiceHelpRequests(status?: HelpRequestStatus): Promi
     )
     .eq('task_type', 'customer_response')
     .eq('title', 'Invoice help requested')
-    .order('created_at', { ascending: false });
-  if (status) query = query.eq('status', status);
-  const { data, error } = await query;
-  if (error) throw new Error(`Unable to load help requests: ${error.message}`);
+    .order('id', { ascending: false })
+    .limit(pageSize + 1);
+  if (input.beforeId) query = query.lt('id', input.beforeId);
+  if (input.status) query = query.eq('status', input.status);
 
-  return (data ?? []).map((row) => {
+  const countQuery = (status?: HelpRequestStatus) => {
+    let count = client
+      .from('review_tasks')
+      .select('id', { count: 'exact', head: true })
+      .eq('task_type', 'customer_response')
+      .eq('title', 'Invoice help requested');
+    if (status) count = count.eq('status', status);
+    return count;
+  };
+  const [pageResult, allCount, openCount, progressCount, resolvedCount] = await Promise.all([
+    query,
+    countQuery(),
+    countQuery('open'),
+    countQuery('in_progress'),
+    countQuery('resolved'),
+  ]);
+  const { data, error } = pageResult;
+  if (error) throw new Error(`Unable to load help requests: ${error.message}`);
+  const countError = allCount.error ?? openCount.error ?? progressCount.error ?? resolvedCount.error;
+  if (countError) throw new Error(`Unable to count help requests: ${countError.message}`);
+
+  const rows = data ?? [];
+  const hasNextPage = rows.length > pageSize;
+  const pageRows = rows.slice(0, pageSize);
+  const items = pageRows.map((row) => {
     const customer = relationOne(row.customers);
     const invoice = relationOne(row.invoices);
     const message = relationOne(row.messages);
@@ -239,6 +276,22 @@ export async function listInvoiceHelpRequests(status?: HelpRequestStatus): Promi
       buttonText: message?.body ? String(message.body) : 'Need Help',
     };
   });
+  return {
+    items,
+    nextCursor: hasNextPage && pageRows.length > 0
+      ? Number(pageRows.at(-1)?.id)
+      : null,
+    counts: {
+      all: allCount.count ?? 0,
+      open: openCount.count ?? 0,
+      in_progress: progressCount.count ?? 0,
+      resolved: resolvedCount.count ?? 0,
+    },
+  };
+}
+
+export async function listInvoiceHelpRequests(status?: HelpRequestStatus): Promise<InvoiceHelpRequest[]> {
+  return (await listInvoiceHelpRequestsPage({ limit: 100, status })).items;
 }
 
 export async function updateInvoiceHelpRequestStatus(

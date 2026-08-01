@@ -287,6 +287,15 @@ export type HelpRequest = {
   buttonText: string;
 };
 
+export type CursorPage<T> = {
+  items: T[];
+  nextCursor: number | null;
+};
+
+export type HelpRequestPage = CursorPage<HelpRequest> & {
+  counts: Record<'all' | HelpRequestStatus, number>;
+};
+
 export type AppRoute =
   | { page: 'overview' }
   | { page: 'deliveries' }

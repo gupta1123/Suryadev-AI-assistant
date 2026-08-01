@@ -2,10 +2,13 @@ import { RefreshCw, Send } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { DeliveryTable } from '../components/DeliveryTable';
+import { PaginationControls } from '../components/PaginationControls';
 import { SendInvoiceModal } from '../components/SendInvoiceModal';
 import { apiRequest } from '../lib/api';
 import { toMessage } from '../lib/format';
-import type { AdminUser, AppRoute, DeliveryConfig, DeliveryJob } from '../types';
+import type { AdminUser, AppRoute, CursorPage, DeliveryConfig, DeliveryJob } from '../types';
+
+const pageSize = 10;
 
 export function DeliveriesPage({
   route,
@@ -22,6 +25,9 @@ export function DeliveriesPage({
 }) {
   const [config, setConfig] = useState<DeliveryConfig | null>(null);
   const [jobs, setJobs] = useState<DeliveryJob[]>([]);
+  const [cursor, setCursor] = useState<number | undefined>();
+  const [cursorHistory, setCursorHistory] = useState<Array<number | undefined>>([]);
+  const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -30,12 +36,15 @@ export function DeliveriesPage({
   const load = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true);
     try {
-      const [nextConfig, nextJobs] = await Promise.all([
+      const query = new URLSearchParams({ limit: String(pageSize), paginated: 'true' });
+      if (cursor) query.set('beforeId', String(cursor));
+      const [nextConfig, nextPage] = await Promise.all([
         apiRequest<DeliveryConfig>('/invoice-delivery/config'),
-        apiRequest<DeliveryJob[]>('/invoice-delivery/jobs?limit=100'),
+        apiRequest<CursorPage<DeliveryJob>>(`/invoice-delivery/jobs?${query}`),
       ]);
       setConfig(nextConfig);
-      setJobs(nextJobs);
+      setJobs(nextPage.items);
+      setNextCursor(nextPage.nextCursor);
       setError('');
     } catch (loadError) {
       setError(toMessage(loadError));
@@ -43,7 +52,22 @@ export function DeliveriesPage({
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [cursor]);
+
+  function goToNextPage() {
+    if (nextCursor === null) return;
+    setLoading(true);
+    setCursorHistory((current) => [...current, cursor]);
+    setCursor(nextCursor);
+  }
+
+  function goToPreviousPage() {
+    if (cursorHistory.length === 0) return;
+    setLoading(true);
+    const previousCursor = cursorHistory[cursorHistory.length - 1];
+    setCursorHistory((current) => current.slice(0, -1));
+    setCursor(previousCursor);
+  }
 
   useEffect(() => { void load(); }, [load]);
   return (
@@ -75,7 +99,21 @@ export function DeliveriesPage({
             <RefreshCw size={15} className={refreshing ? 'spin' : ''} aria-hidden="true" /> Refresh
           </button>
         </div>
-        {loading ? <div className="table-skeleton"><span /><span /><span /></div> : <DeliveryTable jobs={jobs} onOpen={(jobId) => onNavigate(`/deliveries/${jobId}`)} />}
+        {loading ? <div className="table-skeleton"><span /><span /><span /></div> : (
+          <>
+            <DeliveryTable jobs={jobs} onOpen={(jobId) => onNavigate(`/deliveries/${jobId}`)} />
+            <PaginationControls
+              page={cursorHistory.length + 1}
+              itemCount={jobs.length}
+              pageSize={pageSize}
+              hasPrevious={cursorHistory.length > 0}
+              hasNext={nextCursor !== null}
+              disabled={refreshing}
+              onPrevious={goToPreviousPage}
+              onNext={goToNextPage}
+            />
+          </>
+        )}
       </section>
 
       {modalOpen && config?.invoiceSource === 'fixture' && (

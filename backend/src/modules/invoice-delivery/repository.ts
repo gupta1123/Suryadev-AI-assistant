@@ -136,8 +136,17 @@ export async function persistInvoiceAndEnqueue(
   }
 }
 
-export async function listDeliveryJobs(limit = 50, beforeId?: number): Promise<unknown[]> {
+export type CursorPage<T> = {
+  items: T[];
+  nextCursor: number | null;
+};
+
+export async function listDeliveryJobsPage(
+  limit = 50,
+  beforeId?: number,
+): Promise<CursorPage<unknown>> {
   const client = getSupabaseServerClient();
+  const pageSize = Math.min(Math.max(limit, 1), 100);
   let query = client
     .from('communication_jobs')
     .select(
@@ -145,12 +154,24 @@ export async function listDeliveryJobs(limit = 50, beforeId?: number): Promise<u
     )
     .eq('job_type', 'invoice_delivery')
     .order('id', { ascending: false })
-    .limit(Math.min(Math.max(limit, 1), 100));
+    .limit(pageSize + 1);
   if (beforeId) query = query.lt('id', beforeId);
 
   const { data, error } = await query;
   if (error) throw new HttpError(500, 'Unable to load delivery history', error.message);
-  return (data ?? []).map(sanitizeJobForApi);
+  const rows = data ?? [];
+  const hasNextPage = rows.length > pageSize;
+  const pageRows = rows.slice(0, pageSize);
+  return {
+    items: pageRows.map(sanitizeJobForApi),
+    nextCursor: hasNextPage && pageRows.length > 0
+      ? Number(pageRows.at(-1)?.id)
+      : null,
+  };
+}
+
+export async function listDeliveryJobs(limit = 50, beforeId?: number): Promise<unknown[]> {
+  return (await listDeliveryJobsPage(limit, beforeId)).items;
 }
 
 export async function getDeliveryJob(jobId: number): Promise<Record<string, unknown>> {

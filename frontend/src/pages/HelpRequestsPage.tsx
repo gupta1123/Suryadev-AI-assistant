@@ -1,6 +1,7 @@
 import { CheckCircle2, Clock3, LifeBuoy, RefreshCw, RotateCcw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../components/AppShell';
+import { PaginationControls } from '../components/PaginationControls';
 import { StatusBadge } from '../components/StatusBadge';
 import { apiRequest } from '../lib/api';
 import { formatCurrency, formatDateTime, toMessage } from '../lib/format';
@@ -9,10 +10,13 @@ import type {
   AppRoute,
   DeliveryConfig,
   HelpRequest,
+  HelpRequestPage,
   HelpRequestStatus,
 } from '../types';
 
 type HelpFilter = 'all' | HelpRequestStatus;
+type HelpRequestResponse = HelpRequestPage | HelpRequest[];
+const pageSize = 10;
 
 export function HelpRequestsPage({
   route,
@@ -30,6 +34,10 @@ export function HelpRequestsPage({
   const [config, setConfig] = useState<DeliveryConfig | null>(null);
   const [requests, setRequests] = useState<HelpRequest[]>([]);
   const [filter, setFilter] = useState<HelpFilter>('all');
+  const [cursor, setCursor] = useState<number | undefined>();
+  const [cursorHistory, setCursorHistory] = useState<Array<number | undefined>>([]);
+  const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const [counts, setCounts] = useState<HelpRequestPage['counts']>({ all: 0, open: 0, in_progress: 0, resolved: 0 });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
@@ -38,15 +46,25 @@ export function HelpRequestsPage({
   const load = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true);
     try {
+      const query = new URLSearchParams({ limit: String(pageSize), paginated: 'true' });
+      if (cursor) query.set('beforeId', String(cursor));
+      if (filter !== 'all') query.set('status', filter);
       if (silent) {
-        setRequests(await apiRequest<HelpRequest[]>('/invoice-delivery/help-requests'));
+        const response = await apiRequest<HelpRequestResponse>(`/invoice-delivery/help-requests?${query}`);
+        const nextPage = normalizeHelpRequestPage(response, filter);
+        setRequests(nextPage.items);
+        setNextCursor(nextPage.nextCursor);
+        setCounts(nextPage.counts);
       } else {
-        const [nextConfig, nextRequests] = await Promise.all([
+        const [nextConfig, response] = await Promise.all([
           apiRequest<DeliveryConfig>('/invoice-delivery/config'),
-          apiRequest<HelpRequest[]>('/invoice-delivery/help-requests'),
+          apiRequest<HelpRequestResponse>(`/invoice-delivery/help-requests?${query}`),
         ]);
+        const nextPage = normalizeHelpRequestPage(response, filter);
         setConfig(nextConfig);
-        setRequests(nextRequests);
+        setRequests(nextPage.items);
+        setNextCursor(nextPage.nextCursor);
+        setCounts(nextPage.counts);
       }
       setError('');
     } catch (loadError) {
@@ -55,7 +73,7 @@ export function HelpRequestsPage({
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [cursor, filter]);
 
   useEffect(() => {
     void load();
@@ -63,15 +81,29 @@ export function HelpRequestsPage({
     return () => window.clearInterval(interval);
   }, [load]);
 
-  const counts = useMemo(() => ({
-    all: requests.length,
-    open: requests.filter((request) => request.status === 'open').length,
-    in_progress: requests.filter((request) => request.status === 'in_progress').length,
-    resolved: requests.filter((request) => request.status === 'resolved').length,
-  }), [requests]);
-  const visibleRequests = filter === 'all'
-    ? requests
-    : requests.filter((request) => request.status === filter);
+  const visibleRequests = useMemo(() => requests, [requests]);
+
+  function changeFilter(nextFilter: HelpFilter) {
+    setLoading(true);
+    setCursor(undefined);
+    setCursorHistory([]);
+    setFilter(nextFilter);
+  }
+
+  function goToNextPage() {
+    if (nextCursor === null) return;
+    setLoading(true);
+    setCursorHistory((current) => [...current, cursor]);
+    setCursor(nextCursor);
+  }
+
+  function goToPreviousPage() {
+    if (cursorHistory.length === 0) return;
+    setLoading(true);
+    const previousCursor = cursorHistory[cursorHistory.length - 1];
+    setCursorHistory((current) => current.slice(0, -1));
+    setCursor(previousCursor);
+  }
 
   async function updateStatus(id: number, status: HelpRequestStatus) {
     setUpdatingId(id);
@@ -81,11 +113,7 @@ export function HelpRequestsPage({
         method: 'PATCH',
         body: JSON.stringify({ status }),
       });
-      setRequests((current) => current.map((request) => (
-        request.id === id
-          ? { ...request, status, resolvedAt: status === 'resolved' ? new Date().toISOString() : null }
-          : request
-      )));
+      await load(true);
     } catch (updateError) {
       setError(toMessage(updateError));
     } finally {
@@ -130,7 +158,7 @@ export function HelpRequestsPage({
                 className={filter === value ? 'help-filter help-filter--active' : 'help-filter'}
                 type="button"
                 key={value}
-                onClick={() => setFilter(value)}
+                onClick={() => changeFilter(value)}
               >
                 {filterLabel(value)} <span>{counts[value]}</span>
               </button>
@@ -147,8 +175,9 @@ export function HelpRequestsPage({
             <p>When a customer selects “Need Help” on an invoice message, it will appear here automatically.</p>
           </div>
         ) : (
-          <div className="table-scroll">
-            <table className="delivery-table help-table">
+          <>
+            <div className="table-scroll">
+              <table className="delivery-table help-table">
               <thead>
                 <tr><th>Customer</th><th>Invoice</th><th>Requested</th><th>Status</th><th>Actions</th></tr>
               </thead>
@@ -192,12 +221,54 @@ export function HelpRequestsPage({
                   </tr>
                 ))}
               </tbody>
-            </table>
-          </div>
+              </table>
+            </div>
+            <PaginationControls
+              page={cursorHistory.length + 1}
+              itemCount={visibleRequests.length}
+              pageSize={pageSize}
+              hasPrevious={cursorHistory.length > 0}
+              hasNext={nextCursor !== null}
+              disabled={refreshing || updatingId !== null}
+              onPrevious={goToPreviousPage}
+              onNext={goToNextPage}
+            />
+          </>
         )}
       </section>
     </AppShell>
   );
+}
+
+function normalizeHelpRequestPage(
+  response: HelpRequestResponse,
+  filter: HelpFilter,
+): HelpRequestPage {
+  if (!Array.isArray(response)) {
+    return {
+      items: Array.isArray(response.items) ? response.items : [],
+      nextCursor: response.nextCursor ?? null,
+      counts: response.counts ?? emptyHelpRequestCounts(),
+    };
+  }
+
+  const counts = response.reduce((current, request) => {
+    current.all += 1;
+    if (request.status in current) current[request.status] += 1;
+    return current;
+  }, emptyHelpRequestCounts());
+
+  return {
+    items: filter === 'all'
+      ? response
+      : response.filter((request) => request.status === filter),
+    nextCursor: null,
+    counts,
+  };
+}
+
+function emptyHelpRequestCounts(): HelpRequestPage['counts'] {
+  return { all: 0, open: 0, in_progress: 0, resolved: 0 };
 }
 
 function filterLabel(filter: HelpFilter): string {
