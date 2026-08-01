@@ -10,7 +10,7 @@ const envSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   ADMIN_USERNAME: z.string().min(1).max(64).default('admin'),
   ADMIN_PASSWORD: z.string().min(1).max(128).default('admin'),
-  AUTH_SESSION_HOURS: z.coerce.number().int().min(1).max(168).default(24),
+  AUTH_SESSION_HOURS: z.coerce.number().int().min(1).max(168).default(168),
   INVOICE_SOURCE: z.enum(['fixture', 'sap']).default('fixture'),
   FIXTURE_DIRECTORY: z.string().min(1).default('fixtures/sap'),
   DELIVERY_MODE: z.enum(['test', 'production']).default('test'),
