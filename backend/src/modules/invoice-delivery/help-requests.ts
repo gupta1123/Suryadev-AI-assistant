@@ -58,7 +58,9 @@ export function parseMsg91InvoiceButtonResponse(
 
   const replyMessageId =
     findText(payload, ['replyMsgId', 'reply_msg_id', 'contextMessageId', 'context_message_id']) ||
-    findText(messages, ['replyMsgId', 'reply_msg_id', 'contextMessageId', 'context_message_id']);
+    findText(messages, ['replyMsgId', 'reply_msg_id', 'contextMessageId', 'context_message_id']) ||
+    findContextMessageId(messages) ||
+    findContextMessageId(payload);
   if (!replyMessageId) return null;
 
   const inboundMessageId =
@@ -342,6 +344,11 @@ function parseTimestamp(value: unknown, fallback: Date): string {
 
 function findText(value: unknown, keys: string[]): string {
   return primitiveText(findValue(value, keys));
+}
+
+function findContextMessageId(value: unknown): string {
+  const context = findValue(value, ['context']);
+  return findText(context, ['id', 'message_id', 'messageId']);
 }
 
 function primitiveText(value: unknown): string {
