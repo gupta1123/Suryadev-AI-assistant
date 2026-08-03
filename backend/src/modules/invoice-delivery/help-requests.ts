@@ -61,12 +61,16 @@ export function parseMsg91InvoiceButtonResponse(
     findText(messages, ['replyMsgId', 'reply_msg_id', 'contextMessageId', 'context_message_id']) ||
     findContextMessageId(messages) ||
     findContextMessageId(payload);
-  if (!replyMessageId) return null;
+  if (!replyMessageId) {
+    throw new Error('MSG91 invoice button response is missing the original message context');
+  }
 
   const inboundMessageId =
     findText(messages, ['id', 'message_id', 'messageId']) ||
     findText(payload, ['uuid', 'message_uuid', 'messageId', 'message_id']);
-  if (!inboundMessageId) return null;
+  if (!inboundMessageId) {
+    throw new Error('MSG91 invoice button response is missing its inbound message ID');
+  }
 
   const receivedAt = parseTimestamp(
     findValue(messages, ['timestamp']) ??
@@ -215,7 +219,7 @@ export async function listInvoiceHelpRequestsPage(input: {
   let query = client
     .from('review_tasks')
     .select(
-      'id,status,created_at,resolved_at,communication_job_id,message_id,customers(id,display_name,sap_customer_number),invoices(id,sap_billing_document,billing_document_date,transaction_currency,total_gross_amount),messages(body)',
+      'id,status,created_at,resolved_at,communication_job_id,message_id,customers(id,display_name,sap_customer_number),invoices(id,sap_billing_document,billing_document_date,transaction_currency,total_gross_amount),messages(body,received_at)',
     )
     .eq('task_type', 'customer_response')
     .eq('title', 'Invoice help requested')
@@ -255,7 +259,7 @@ export async function listInvoiceHelpRequestsPage(input: {
     return {
       id: Number(row.id),
       status: row.status as HelpRequestStatus,
-      requestedAt: String(row.created_at),
+      requestedAt: message?.received_at ? String(message.received_at) : String(row.created_at),
       resolvedAt: row.resolved_at ? String(row.resolved_at) : null,
       customer: customer
         ? {

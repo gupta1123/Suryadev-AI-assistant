@@ -57,4 +57,15 @@ describe('MSG91 invoice button replies', () => {
   it('ignores ordinary inbound text messages', () => {
     assert.equal(parseMsg91InvoiceButtonResponse({ messages: '[{"text":{"body":"Hello"}}]' }), null);
   });
+
+  it('does not silently discard a recognized button with no original-message context', () => {
+    assert.throws(
+      () =>
+        parseMsg91InvoiceButtonResponse({
+          button: { payload: 'needs_help', text: 'Need Help' },
+          uuid: 'inbound-wamid',
+        }),
+      /missing the original message context/,
+    );
+  });
 });
