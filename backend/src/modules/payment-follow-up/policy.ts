@@ -12,7 +12,7 @@ import type { InvoiceCandidate, ValidationResult } from '../invoice-delivery/dom
 import { formatInvoiceAmount, formatInvoiceDate, maskPhone } from '../invoice-delivery/policy.js';
 import type { AgingBucket, PaymentTestPreview, TestReceivable } from './domain.js';
 
-export const PAYMENT_HARD_TEST_RECIPIENT = '917019339764';
+export const PAYMENT_HARD_TEST_RECIPIENT = '919765723830';
 
 export function paymentReminderDelayMs(
   reminderCount: number,

@@ -95,7 +95,7 @@ export function PaymentFollowUpsPage({
         <div>
           <strong>Controlled test deployment</strong>
           <p>
-            Locked to {paymentConfig?.maskedRecipient || 'the approved test number'}. The invoice is sent first. After MSG91 accepts that invoice, the first payment reminder is scheduled after {paymentConfig?.firstReminderDelaySeconds ?? 120} seconds and the next after {paymentConfig?.repeatReminderDelaySeconds ?? 10} seconds. The agent checks payment status before every reminder and stops after {paymentConfig?.maximumTestReminders ?? 2} reminders.
+            Locked to {paymentConfig?.maskedRecipient || 'the approved test number'}. The invoice is sent first. After WhatsApp reports that invoice as sent, the first payment reminder is scheduled after {paymentConfig?.firstReminderDelaySeconds ?? 120} seconds and the next after {paymentConfig?.repeatReminderDelaySeconds ?? 20} seconds. The agent checks payment status before every reminder and stops after {paymentConfig?.maximumTestReminders ?? 2} reminders.
           </p>
         </div>
         <em>{paymentConfig?.deploymentAllowed ? 'Safety lock active' : 'Disabled'}</em>

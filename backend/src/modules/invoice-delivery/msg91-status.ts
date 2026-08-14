@@ -4,6 +4,7 @@ import {
   listPendingProviderRequestIds,
   type ProviderDeliveryStatus,
 } from './repository.js';
+import { handOffSentInvoiceToPaymentSchedule } from '../payment-follow-up/handoff.js';
 
 const MSG91_WHATSAPP_LOGS_URL = 'https://control.msg91.com/api/v5/report/logs/wa';
 
@@ -61,7 +62,7 @@ export async function reconcileMsg91DeliveryStatuses(): Promise<{
       const status = normalizeMsg91Status(log.status);
       if (!status) continue;
       matched += 1;
-      const applied = await applyProviderDeliveryStatus({
+      const update = await applyProviderDeliveryStatus({
         providerRequestId: requestId,
         ...(text(log.uuid) ? { providerMessageId: text(log.uuid) } : {}),
         status,
@@ -79,7 +80,16 @@ export async function reconcileMsg91DeliveryStatuses(): Promise<{
           : {}),
         payload: sanitizeMsg91Report(log),
       });
-      if (applied) updated += 1;
+      if (update.applied) updated += 1;
+      if (
+        update.applied &&
+        update.jobId &&
+        update.sentAt &&
+        update.status &&
+        ['sent', 'delivered', 'read'].includes(update.status)
+      ) {
+        await handOffSentInvoiceToPaymentSchedule(update.jobId, update.sentAt);
+      }
     }
     return { pending: pendingIds.length, matched, updated };
   } finally {

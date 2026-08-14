@@ -79,7 +79,7 @@ export async function preparePaymentEndToEndTest(
         environment: 'deployed_controlled_test',
         reason: 'SAP receivables API is not authorized in QAS',
         payment_test_cycle_id: cycleId,
-        payment_handoff: 'waiting_for_invoice_acceptance',
+        payment_handoff: 'waiting_for_invoice_sent_status',
       },
     };
     await requiredSingle(
@@ -143,7 +143,7 @@ export async function preparePaymentEndToEndTest(
         due_date: preview.receivable.dueDate,
         masked_recipient: preview.maskedRecipient,
         payment_test_cycle_id: cycleId,
-        waiting_for: 'invoice_acceptance',
+        waiting_for: 'invoice_sent_status',
         first_delay_seconds: env.PAYMENT_FIRST_REMINDER_DELAY_SECONDS,
         repeat_delay_seconds: env.PAYMENT_REPEAT_REMINDER_DELAY_SECONDS,
       },
@@ -162,9 +162,9 @@ export async function preparePaymentEndToEndTest(
   }
 }
 
-export async function activatePaymentTestAfterInvoiceAccepted(
+export async function activatePaymentTestAfterInvoiceSent(
   preview: PaymentTestPreview,
-  input: { cycleId: string; invoiceJobId: number; acceptedAt: string },
+  input: { cycleId: string; invoiceJobId: number; sentAt: string },
 ): Promise<{ caseId: number; firstActionAt: string; duplicate: boolean }> {
   assertHardPaymentRecipient(preview.recipient);
   const client = getSupabaseServerClient();
@@ -217,16 +217,16 @@ export async function activatePaymentTestAfterInvoiceAccepted(
     };
   }
 
-  const acceptedAt = Date.parse(input.acceptedAt);
-  if (!Number.isFinite(acceptedAt)) throw new Error('Invalid invoice acceptance timestamp');
+  const sentAt = Date.parse(input.sentAt);
+  if (!Number.isFinite(sentAt)) throw new Error('Invalid invoice sent timestamp');
   const firstActionAt = new Date(
-    acceptedAt + paymentReminderDelayMs(
+    sentAt + paymentReminderDelayMs(
       0,
       env.PAYMENT_FIRST_REMINDER_DELAY_SECONDS,
       env.PAYMENT_REPEAT_REMINDER_DELAY_SECONDS,
     ),
   ).toISOString();
-  const { error: updateError } = await client
+  const { data: activated, error: updateError } = await client
     .from('payment_follow_up_cases')
     .update({
       status: 'active',
@@ -235,16 +235,35 @@ export async function activatePaymentTestAfterInvoiceAccepted(
       last_reminder_at: null,
       resolved_at: null,
     })
-    .eq('id', paymentCase.id);
+    .eq('id', paymentCase.id)
+    .eq('status', 'paused')
+    .is('next_action_at', null)
+    .select('id')
+    .maybeSingle();
   if (updateError) throw new Error(`Unable to activate the payment schedule: ${updateError.message}`);
+  if (!activated) {
+    const { data: current, error: currentError } = await client
+      .from('payment_follow_up_cases')
+      .select('id,next_action_at')
+      .eq('id', paymentCase.id)
+      .single();
+    if (currentError || !current?.next_action_at) {
+      throw new Error(currentError?.message ?? 'Payment schedule activation was not applied');
+    }
+    return {
+      caseId: Number(current.id),
+      firstActionAt: String(current.next_action_at),
+      duplicate: true,
+    };
+  }
   await client.from('audit_logs').insert({
     actor_type: 'agent',
-    action: 'controlled_payment_schedule_activated_after_invoice_acceptance',
+    action: 'controlled_payment_schedule_activated_after_invoice_sent',
     entity_type: 'payment_follow_up_case',
     entity_id: String(paymentCase.id),
     after_data: {
       invoice_job_id: input.invoiceJobId,
-      invoice_accepted_at: input.acceptedAt,
+      invoice_sent_at: input.sentAt,
       first_action_at: firstActionAt,
       first_delay_seconds: env.PAYMENT_FIRST_REMINDER_DELAY_SECONDS,
       payment_test_cycle_id: input.cycleId,

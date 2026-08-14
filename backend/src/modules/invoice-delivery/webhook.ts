@@ -6,6 +6,7 @@ import { getSupabaseServerClient } from '../../lib/supabase.js';
 import { msg91Timestamp, normalizeMsg91Status } from './msg91-status.js';
 import { applyProviderDeliveryStatus } from './repository.js';
 import { processMsg91InvoiceButtonResponse } from './help-requests.js';
+import { handOffSentInvoiceToPaymentSchedule } from '../payment-follow-up/handoff.js';
 
 export const msg91WebhookRouter = Router();
 
@@ -54,7 +55,7 @@ msg91WebhookRouter.post(
     try {
       const status = normalizeMsg91Status(eventType);
       if (status) {
-        await applyProviderDeliveryStatus({
+        const update = await applyProviderDeliveryStatus({
           ...(providerRequestId ? { providerRequestId } : {}),
           ...(providerMessageId ? { providerMessageId } : {}),
           status,
@@ -78,6 +79,15 @@ msg91WebhookRouter.post(
             : {}),
           payload,
         });
+        if (
+          update.applied &&
+          update.jobId &&
+          update.sentAt &&
+          update.status &&
+          ['sent', 'delivered', 'read'].includes(update.status)
+        ) {
+          await handOffSentInvoiceToPaymentSchedule(update.jobId, update.sentAt);
+        }
       }
       await processMsg91InvoiceButtonResponse({
         payload,

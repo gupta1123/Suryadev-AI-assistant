@@ -163,7 +163,7 @@ export async function persistControlledInvoiceResendAndEnqueue(
       controlled_test: true,
       payment_e2e_test: true,
       payment_test_cycle_id: cycleId,
-      handoff: 'invoice_accepted_to_payment_schedule',
+      handoff: 'invoice_sent_to_payment_schedule',
     },
   });
 }
@@ -369,6 +369,16 @@ export async function getDeliveryJobContext(job: ClaimedJob): Promise<DeliveryJo
     document: document as DeliveryJobContext['document'],
     providerIntegrationId: provider?.id ? Number(provider.id) : null,
   };
+}
+
+export async function getDeliveryJobContextById(jobId: number): Promise<DeliveryJobContext> {
+  const { data, error } = await getSupabaseServerClient()
+    .from('communication_jobs')
+    .select('*')
+    .eq('id', jobId)
+    .single();
+  if (error || !data) throw new Error(error?.message ?? 'Delivery job not found');
+  return getDeliveryJobContext(asClaimedJob(data));
 }
 
 export async function createInvoiceDocumentUrl(
@@ -707,6 +717,13 @@ export async function listPendingProviderRequestIds(
 
 export type ProviderDeliveryStatus = 'accepted' | 'sent' | 'delivered' | 'read' | 'failed';
 
+export type ProviderDeliveryUpdateResult = {
+  applied: boolean;
+  jobId?: number;
+  status?: ProviderDeliveryStatus;
+  sentAt?: string;
+};
+
 export async function applyProviderDeliveryStatus(input: {
   providerRequestId?: string;
   providerMessageId?: string;
@@ -718,7 +735,7 @@ export async function applyProviderDeliveryStatus(input: {
   failureCode?: string;
   failureReason?: string;
   payload?: Record<string, unknown>;
-}): Promise<boolean> {
+}): Promise<ProviderDeliveryUpdateResult> {
   const client = getSupabaseServerClient();
   let attemptQuery = client
     .from('message_attempts')
@@ -734,15 +751,15 @@ export async function applyProviderDeliveryStatus(input: {
       .eq('provider_message_id', input.providerMessageId)
       .maybeSingle();
     if (messageLookupError) throw new Error(messageLookupError.message);
-    if (!message) return false;
+    if (!message) return { applied: false };
     attemptQuery = attemptQuery.eq('message_id', message.id);
   } else {
-    return false;
+    return { applied: false };
   }
 
   const { data: attempt, error: attemptError } = await attemptQuery.maybeSingle();
   if (attemptError) throw new Error(attemptError.message);
-  if (!attempt) return false;
+  if (!attempt) return { applied: false };
   const { data: message, error: messageError } = await client
     .from('messages')
     .select(
@@ -754,10 +771,20 @@ export async function applyProviderDeliveryStatus(input: {
 
   const currentStatus = String(message.status) as ProviderDeliveryStatus;
   if (input.status !== 'failed' && statusRank(input.status) < statusRank(currentStatus)) {
-    return true;
+    return {
+      applied: true,
+      jobId: Number(message.communication_job_id),
+      status: currentStatus,
+      ...(message.sent_at ? { sentAt: String(message.sent_at) } : {}),
+    };
   }
   if (input.status === 'failed' && ['sent', 'delivered', 'read'].includes(currentStatus)) {
-    return true;
+    return {
+      applied: true,
+      jobId: Number(message.communication_job_id),
+      status: currentStatus,
+      ...(message.sent_at ? { sentAt: String(message.sent_at) } : {}),
+    };
   }
 
   const now = new Date().toISOString();
@@ -809,7 +836,12 @@ export async function applyProviderDeliveryStatus(input: {
       })
       .eq('id', message.communication_job_id),
   );
-  return true;
+  return {
+    applied: true,
+    jobId: Number(message.communication_job_id),
+    status: input.status,
+    ...(messageValues.sent_at ? { sentAt: String(messageValues.sent_at) } : {}),
+  };
 }
 
 export async function persistInvoiceRecord(

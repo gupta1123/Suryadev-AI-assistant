@@ -1,13 +1,14 @@
 import { digitsOnly, env } from '../../config/env.js';
-import type { DeliveryJobContext } from '../invoice-delivery/repository.js';
-import { activatePaymentTestAfterInvoiceAccepted } from './repository.js';
+import { getDeliveryJobContextById } from '../invoice-delivery/repository.js';
+import { activatePaymentTestAfterInvoiceSent } from './repository.js';
 import { getPaymentTestPreview } from './service.js';
 import { PAYMENT_HARD_TEST_RECIPIENT } from './policy.js';
 
-export async function handOffAcceptedInvoiceToPaymentSchedule(
-  context: DeliveryJobContext,
-  acceptedAt: string,
+export async function handOffSentInvoiceToPaymentSchedule(
+  jobId: number,
+  sentAt: string,
 ): Promise<void> {
+  const context = await getDeliveryJobContextById(jobId);
   if (
     context.job_type !== 'manual_resend' ||
     context.metadata.payment_e2e_test !== true
@@ -34,9 +35,9 @@ export async function handOffAcceptedInvoiceToPaymentSchedule(
     throw new Error(`Invoice-to-payment handoff failed preflight: ${failedChecks}`);
   }
 
-  await activatePaymentTestAfterInvoiceAccepted(preview, {
+  await activatePaymentTestAfterInvoiceSent(preview, {
     cycleId,
     invoiceJobId: context.id,
-    acceptedAt,
+    sentAt,
   });
 }
