@@ -6,6 +6,7 @@ import {
   sendInvoiceTemplate,
 } from './msg91-client.js';
 import { formatInvoiceAmount, formatInvoiceDate } from './policy.js';
+import { handOffAcceptedInvoiceToPaymentSchedule } from '../payment-follow-up/handoff.js';
 import {
   claimNextDeliveryJob,
   createInvoiceDocumentUrl,
@@ -91,6 +92,7 @@ async function processClaimedJob(job: Awaited<ReturnType<typeof claimNextDeliver
   try {
     const result = await sendInvoiceTemplate(templateInput);
     if (result.ok) {
+      const acceptedAt = new Date().toISOString();
       await markDeliveryAccepted({
         jobId: context.id,
         messageId: message.id,
@@ -105,6 +107,14 @@ async function processClaimedJob(job: Awaited<ReturnType<typeof claimNextDeliver
           ? { providerMessageId: result.providerMessageId }
           : {}),
       });
+      try {
+        await handOffAcceptedInvoiceToPaymentSchedule(context, acceptedAt);
+      } catch (error) {
+        console.error(
+          'Invoice was accepted but the controlled payment handoff failed',
+          error instanceof Error ? error.message : error,
+        );
+      }
       return;
     }
 

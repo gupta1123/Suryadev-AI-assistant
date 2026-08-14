@@ -95,7 +95,7 @@ export function PaymentFollowUpsPage({
         <div>
           <strong>Controlled test deployment</strong>
           <p>
-            Locked to {paymentConfig?.maskedRecipient || 'the approved test number'}. The first reminder is scheduled after {paymentConfig?.firstReminderDelaySeconds ?? 60} seconds, the next after {paymentConfig?.repeatReminderDelaySeconds ?? 10} seconds, and the agent checks payment status before every send. It stops after {paymentConfig?.maximumTestReminders ?? 2} reminders.
+            Locked to {paymentConfig?.maskedRecipient || 'the approved test number'}. The invoice is sent first. After MSG91 accepts that invoice, the first payment reminder is scheduled after {paymentConfig?.firstReminderDelaySeconds ?? 120} seconds and the next after {paymentConfig?.repeatReminderDelaySeconds ?? 10} seconds. The agent checks payment status before every reminder and stops after {paymentConfig?.maximumTestReminders ?? 2} reminders.
           </p>
         </div>
         <em>{paymentConfig?.deploymentAllowed ? 'Safety lock active' : 'Disabled'}</em>
@@ -208,8 +208,8 @@ function PaymentTestModal({
 
   return (
     <Modal
-      title="Schedule test payment reminders"
-      description="Review the exact SAP invoice, test amount and recipient before scheduling the two-message test."
+      title="Run invoice-to-payment test"
+      description="Review the exact SAP invoice and recipient. The test sends the invoice first, then schedules two payment reminders from the successful invoice send."
       onClose={onClose}
       width="large"
     >
@@ -244,7 +244,7 @@ function PaymentTestModal({
           <div className="modal-footer">
             <button className="button button--secondary" type="button" onClick={onClose}>Cancel</button>
             <button className="button button--primary" type="button" disabled={!preview.sendAllowed || sending} onClick={() => void send()}>
-              <Send size={15} aria-hidden="true" /> {sending ? 'Scheduling…' : 'Schedule test reminders'}
+              <Send size={15} aria-hidden="true" /> {sending ? 'Starting test…' : 'Send invoice and start test'}
             </button>
           </div>
         </>

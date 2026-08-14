@@ -71,6 +71,8 @@ async function processClaimedPaymentJob(
     throw new Error('Payment reminder job has no follow-up case');
   }
   const outstandingAmount = Number(context.metadata.outstanding_amount);
+  const cycleId = String(context.metadata.payment_test_cycle_id ?? '');
+  if (!cycleId) throw new Error('Payment reminder job has no controlled test cycle');
   const messageBody = `Payment reminder for invoice ${context.invoice.sap_billing_document}`;
   const message = await getOrCreateMessage(context, {
     purpose: 'payment_reminder',
@@ -104,7 +106,10 @@ async function processClaimedPaymentJob(
         ...(result.providerRequestId ? { providerRequestId: result.providerRequestId } : {}),
         ...(result.providerMessageId ? { providerMessageId: result.providerMessageId } : {}),
       });
-      await markPaymentReminderScheduledNext(context.payment_follow_up_case_id);
+      await markPaymentReminderScheduledNext(
+        context.payment_follow_up_case_id,
+        cycleId,
+      );
       return;
     }
 

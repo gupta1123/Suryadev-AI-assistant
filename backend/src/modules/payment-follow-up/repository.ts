@@ -27,8 +27,9 @@ export type PaymentScheduleResult = {
   jobId?: number;
 };
 
-export async function persistPaymentTestAndSchedule(
+export async function preparePaymentEndToEndTest(
   preview: PaymentTestPreview,
+  cycleId: string,
   startedBy?: string,
 ): Promise<PaymentTestRunResult> {
   assertHardPaymentRecipient(preview.recipient);
@@ -40,22 +41,21 @@ export async function persistPaymentTestAndSchedule(
     .eq('invoice_id', invoice.invoiceId)
     .maybeSingle();
   if (existingCaseError) throw new Error(existingCaseError.message);
-  if (existingCase) {
-    const { data: existingJob, error: existingJobError } = await client
-      .from('communication_jobs')
-      .select('id')
-      .eq('job_type', 'payment_reminder')
-      .eq('payment_follow_up_case_id', existingCase.id)
-      .order('id', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (existingJobError) throw new Error(existingJobError.message);
-    return {
-      caseId: Number(existingCase.id),
-      jobId: existingJob ? Number(existingJob.id) : null,
-      duplicate: true,
-      status: String(existingCase.status),
-    };
+  if (existingCase?.status === 'active') {
+    throw new HttpError(409, 'A controlled payment follow-up test is already active');
+  }
+  const { data: pendingInvoiceJob, error: pendingInvoiceJobError } = await client
+    .from('communication_jobs')
+    .select('id')
+    .eq('primary_invoice_id', invoice.invoiceId)
+    .eq('job_type', 'manual_resend')
+    .in('status', ['queued', 'processing'])
+    .contains('metadata', { payment_e2e_test: true })
+    .limit(1)
+    .maybeSingle();
+  if (pendingInvoiceJobError) throw new Error(pendingInvoiceJobError.message);
+  if (pendingInvoiceJob) {
+    throw new HttpError(409, 'The controlled invoice send is already in progress');
   }
 
   const runId = await createAgentRun(client, startedBy);
@@ -63,13 +63,6 @@ export async function persistPaymentTestAndSchedule(
   try {
     const configuration = await ensurePaymentConfiguration(client);
     const now = new Date().toISOString();
-    const firstActionAt = new Date(
-      Date.now() + paymentReminderDelayMs(
-        0,
-        env.PAYMENT_FIRST_REMINDER_DELAY_SECONDS,
-        env.PAYMENT_REPEAT_REMINDER_DELAY_SECONDS,
-      ),
-    ).toISOString();
     const receivableValues = {
       invoice_id: invoice.invoiceId,
       original_amount: preview.receivable.originalAmount,
@@ -85,6 +78,8 @@ export async function persistPaymentTestAndSchedule(
         source: 'test_fixture',
         environment: 'deployed_controlled_test',
         reason: 'SAP receivables API is not authorized in QAS',
+        payment_test_cycle_id: cycleId,
+        payment_handoff: 'waiting_for_invoice_acceptance',
       },
     };
     await requiredSingle(
@@ -123,9 +118,10 @@ export async function persistPaymentTestAndSchedule(
             invoice_id: invoice.invoiceId,
             reminder_policy_id: configuration.policyId,
             current_stage_id: configuration.stageId,
-            status: 'active',
-            next_action_at: firstActionAt,
+            status: 'paused',
+            next_action_at: null,
             paused_until: null,
+            last_reminder_at: null,
             resolved_at: null,
           },
           { onConflict: 'invoice_id' },
@@ -137,7 +133,7 @@ export async function persistPaymentTestAndSchedule(
 
     await client.from('audit_logs').insert({
       actor_type: 'agent',
-      action: 'controlled_payment_reminder_test_scheduled',
+      action: 'controlled_payment_e2e_test_prepared',
       entity_type: 'payment_follow_up_case',
       entity_id: String(paymentCase.id),
       after_data: {
@@ -146,23 +142,116 @@ export async function persistPaymentTestAndSchedule(
         amount: preview.receivable.outstandingAmount,
         due_date: preview.receivable.dueDate,
         masked_recipient: preview.maskedRecipient,
-        first_action_at: firstActionAt,
+        payment_test_cycle_id: cycleId,
+        waiting_for: 'invoice_acceptance',
         first_delay_seconds: env.PAYMENT_FIRST_REMINDER_DELAY_SECONDS,
         repeat_delay_seconds: env.PAYMENT_REPEAT_REMINDER_DELAY_SECONDS,
       },
-      metadata: { controlled_test: true },
+      metadata: { controlled_test: true, payment_test_cycle_id: cycleId },
     });
     await finishAgentRun(client, runId, 'succeeded', 1, 1, 0);
     return {
       caseId: Number(paymentCase.id),
       jobId: null,
       duplicate: false,
-      status: 'scheduled',
+      status: 'waiting_for_invoice',
     };
   } catch (error) {
     await finishAgentRun(client, runId, 'failed', 1, 0, 1, errorMessage(error));
     throw error;
   }
+}
+
+export async function activatePaymentTestAfterInvoiceAccepted(
+  preview: PaymentTestPreview,
+  input: { cycleId: string; invoiceJobId: number; acceptedAt: string },
+): Promise<{ caseId: number; firstActionAt: string; duplicate: boolean }> {
+  assertHardPaymentRecipient(preview.recipient);
+  const client = getSupabaseServerClient();
+  const invoice = await persistInvoiceRecord(client, preview.candidate, 'sap');
+  const { data: invoiceJob, error: invoiceJobError } = await client
+    .from('communication_jobs')
+    .select('id,job_type,status,metadata')
+    .eq('id', input.invoiceJobId)
+    .eq('primary_invoice_id', invoice.invoiceId)
+    .single();
+  if (invoiceJobError || !invoiceJob) {
+    throw new Error(invoiceJobError?.message ?? 'Controlled invoice job was not found');
+  }
+  const jobMetadata = isRecord(invoiceJob.metadata) ? invoiceJob.metadata : {};
+  if (
+    invoiceJob.job_type !== 'manual_resend' ||
+    invoiceJob.status !== 'completed' ||
+    jobMetadata.payment_e2e_test !== true ||
+    jobMetadata.payment_test_cycle_id !== input.cycleId
+  ) {
+    throw new Error('Payment follow-up activation refused an invalid invoice handoff');
+  }
+
+  const { data: receivable, error: receivableError } = await client
+    .from('invoice_receivables')
+    .select('raw_data')
+    .eq('invoice_id', invoice.invoiceId)
+    .single();
+  if (receivableError || !receivable) {
+    throw new Error(receivableError?.message ?? 'Controlled receivable was not found');
+  }
+  const receivableMetadata = isRecord(receivable.raw_data) ? receivable.raw_data : {};
+  if (receivableMetadata.payment_test_cycle_id !== input.cycleId) {
+    throw new Error('Payment follow-up activation refused a stale test cycle');
+  }
+
+  const { data: paymentCase, error: caseError } = await client
+    .from('payment_follow_up_cases')
+    .select('id,status,next_action_at')
+    .eq('invoice_id', invoice.invoiceId)
+    .single();
+  if (caseError || !paymentCase) {
+    throw new Error(caseError?.message ?? 'Controlled payment case was not found');
+  }
+  if (paymentCase.status === 'active' && paymentCase.next_action_at) {
+    return {
+      caseId: Number(paymentCase.id),
+      firstActionAt: String(paymentCase.next_action_at),
+      duplicate: true,
+    };
+  }
+
+  const acceptedAt = Date.parse(input.acceptedAt);
+  if (!Number.isFinite(acceptedAt)) throw new Error('Invalid invoice acceptance timestamp');
+  const firstActionAt = new Date(
+    acceptedAt + paymentReminderDelayMs(
+      0,
+      env.PAYMENT_FIRST_REMINDER_DELAY_SECONDS,
+      env.PAYMENT_REPEAT_REMINDER_DELAY_SECONDS,
+    ),
+  ).toISOString();
+  const { error: updateError } = await client
+    .from('payment_follow_up_cases')
+    .update({
+      status: 'active',
+      next_action_at: firstActionAt,
+      paused_until: null,
+      last_reminder_at: null,
+      resolved_at: null,
+    })
+    .eq('id', paymentCase.id);
+  if (updateError) throw new Error(`Unable to activate the payment schedule: ${updateError.message}`);
+  await client.from('audit_logs').insert({
+    actor_type: 'agent',
+    action: 'controlled_payment_schedule_activated_after_invoice_acceptance',
+    entity_type: 'payment_follow_up_case',
+    entity_id: String(paymentCase.id),
+    after_data: {
+      invoice_job_id: input.invoiceJobId,
+      invoice_accepted_at: input.acceptedAt,
+      first_action_at: firstActionAt,
+      first_delay_seconds: env.PAYMENT_FIRST_REMINDER_DELAY_SECONDS,
+      payment_test_cycle_id: input.cycleId,
+    },
+    metadata: { controlled_test: true, payment_test_cycle_id: input.cycleId },
+  });
+  return { caseId: Number(paymentCase.id), firstActionAt, duplicate: false };
 }
 
 export async function listPaymentCases(): Promise<Record<string, unknown>[]> {
@@ -239,14 +328,18 @@ export async function getPaymentCase(caseId: number): Promise<Record<string, unk
   return { ...paymentCase, jobs: (jobs ?? []).map(sanitizeJob) };
 }
 
-export async function markPaymentReminderScheduledNext(caseId: number): Promise<void> {
+export async function markPaymentReminderScheduledNext(
+  caseId: number,
+  cycleId: string,
+): Promise<void> {
   const now = new Date();
   const client = getSupabaseServerClient();
   const { count, error: countError } = await client
     .from('communication_jobs')
     .select('id', { count: 'exact', head: true })
     .eq('job_type', 'payment_reminder')
-    .eq('payment_follow_up_case_id', caseId);
+    .eq('payment_follow_up_case_id', caseId)
+    .contains('metadata', { payment_test_cycle_id: cycleId });
   if (countError) throw new Error(`Unable to count payment reminders: ${countError.message}`);
   const reminderCount = count ?? 0;
   const capped = reminderCount >= env.PAYMENT_TEST_MAX_REMINDERS;
@@ -277,7 +370,7 @@ export async function markPaymentReminderScheduledNext(caseId: number): Promise<
       next_action_at: capped ? null : next.toISOString(),
       repeat_delay_seconds: env.PAYMENT_REPEAT_REMINDER_DELAY_SECONDS,
     },
-    metadata: { controlled_test: true },
+    metadata: { controlled_test: true, payment_test_cycle_id: cycleId },
   });
 }
 
@@ -286,6 +379,8 @@ export async function preparePaymentTestSchedule(): Promise<void> {
   const client = getSupabaseServerClient();
   const invoice = await findConfiguredTestInvoice(client);
   if (!invoice) return;
+  const cycleId = await getPaymentTestCycleId(client, Number(invoice.id));
+  if (!cycleId) return;
   const { data: paymentCase, error: caseError } = await client
     .from('payment_follow_up_cases')
     .select('id,status,last_reminder_at,next_action_at')
@@ -293,7 +388,7 @@ export async function preparePaymentTestSchedule(): Promise<void> {
     .maybeSingle();
   if (caseError) throw new Error(`Unable to load the controlled payment case: ${caseError.message}`);
   if (!paymentCase) return;
-  const reminderCount = await countPaymentReminders(client, Number(paymentCase.id));
+  const reminderCount = await countPaymentReminders(client, Number(paymentCase.id), cycleId);
   if (reminderCount >= env.PAYMENT_TEST_MAX_REMINDERS) {
     const { error } = await client
       .from('payment_follow_up_cases')
@@ -350,13 +445,22 @@ export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleRe
   }
   const status = String(receivable.payment_status);
   const outstandingAmount = Number(receivable.outstanding_amount);
+  const receivableMetadata = isRecord(receivable.raw_data) ? receivable.raw_data : {};
+  const cycleId = String(receivableMetadata.payment_test_cycle_id ?? '');
+  if (!cycleId) {
+    throw new Error('Controlled payment cycle is missing from the receivable status');
+  }
   await client.from('audit_logs').insert({
     actor_type: 'agent',
     action: 'controlled_payment_status_checked',
     entity_type: 'payment_follow_up_case',
     entity_id: String(paymentCase.id),
     after_data: { payment_status: status, outstanding_amount: outstandingAmount },
-    metadata: { controlled_test: true, scheduled_for: String(paymentCase.next_action_at) },
+    metadata: {
+      controlled_test: true,
+      scheduled_for: String(paymentCase.next_action_at),
+      payment_test_cycle_id: cycleId,
+    },
   });
   if (['paid', 'written_off', 'cancelled'].includes(status) || outstandingAmount <= 0) {
     const { error } = await client
@@ -368,9 +472,9 @@ export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleRe
   }
 
   const caseId = Number(paymentCase.id);
-  const reminderCount = await countPaymentReminders(client, caseId);
+  const reminderCount = await countPaymentReminders(client, caseId, cycleId);
   if (reminderCount >= env.PAYMENT_TEST_MAX_REMINDERS) {
-    await pausePaymentTestAtCap(client, caseId, reminderCount);
+    await pausePaymentTestAtCap(client, caseId, reminderCount, cycleId);
     return { enqueued: false, reason: 'reminder_cap_reached' };
   }
 
@@ -461,6 +565,7 @@ export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleRe
           outstanding_amount: outstandingAmount,
           template_name: env.MSG91_PAYMENT_TEMPLATE_NAME,
           reminder_number: reminderNumber,
+          payment_test_cycle_id: cycleId,
           status_checked_at: now.toISOString(),
           scheduled_for: scheduledFor,
         },
@@ -492,7 +597,11 @@ export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleRe
         outstanding_amount: outstandingAmount,
         masked_recipient: maskPhone(PAYMENT_HARD_TEST_RECIPIENT),
       },
-      metadata: { controlled_test: true, trigger_type: 'scheduled' },
+      metadata: {
+        controlled_test: true,
+        trigger_type: 'scheduled',
+        payment_test_cycle_id: cycleId,
+      },
     });
     await finishAgentRun(client, runId, 'succeeded', 1, 1, 0);
     return { enqueued: true, reason: 'enqueued', jobId: Number(insertedJob.id) };
@@ -534,12 +643,32 @@ async function findConfiguredTestInvoice(client: SupabaseClient): Promise<Record
   return data;
 }
 
-async function countPaymentReminders(client: SupabaseClient, caseId: number): Promise<number> {
+async function getPaymentTestCycleId(
+  client: SupabaseClient,
+  invoiceId: number,
+): Promise<string | null> {
+  const { data, error } = await client
+    .from('invoice_receivables')
+    .select('raw_data')
+    .eq('invoice_id', invoiceId)
+    .maybeSingle();
+  if (error) throw new Error(`Unable to load the controlled payment cycle: ${error.message}`);
+  const metadata = data && isRecord(data.raw_data) ? data.raw_data : {};
+  const cycleId = String(metadata.payment_test_cycle_id ?? '');
+  return cycleId || null;
+}
+
+async function countPaymentReminders(
+  client: SupabaseClient,
+  caseId: number,
+  cycleId: string,
+): Promise<number> {
   const { count, error } = await client
     .from('communication_jobs')
     .select('id', { count: 'exact', head: true })
     .eq('job_type', 'payment_reminder')
-    .eq('payment_follow_up_case_id', caseId);
+    .eq('payment_follow_up_case_id', caseId)
+    .contains('metadata', { payment_test_cycle_id: cycleId });
   if (error) throw new Error(`Unable to count payment reminders: ${error.message}`);
   return count ?? 0;
 }
@@ -548,6 +677,7 @@ async function pausePaymentTestAtCap(
   client: SupabaseClient,
   caseId: number,
   reminderCount: number,
+  cycleId: string,
 ): Promise<void> {
   const { error } = await client
     .from('payment_follow_up_cases')
@@ -560,7 +690,7 @@ async function pausePaymentTestAtCap(
     entity_type: 'payment_follow_up_case',
     entity_id: String(caseId),
     after_data: { reminder_count: reminderCount, maximum_reminders: env.PAYMENT_TEST_MAX_REMINDERS },
-    metadata: { controlled_test: true },
+    metadata: { controlled_test: true, payment_test_cycle_id: cycleId },
   });
 }
 
@@ -726,4 +856,8 @@ function sanitizeJob<T extends Record<string, unknown>>(job: T): T {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown payment follow-up error';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

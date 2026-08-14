@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import {
@@ -11,9 +12,11 @@ import { maskPhone } from '../invoice-delivery/policy.js';
 import {
   getPaymentCase,
   listPaymentCases,
-  persistPaymentTestAndSchedule,
+  preparePaymentEndToEndTest,
 } from './repository.js';
 import { getPaymentTestPreview } from './service.js';
+import { persistControlledInvoiceResendAndEnqueue } from '../invoice-delivery/repository.js';
+import { processDeliveryQueue } from '../invoice-delivery/worker.js';
 
 const caseIdSchema = z.coerce.number().int().positive();
 
@@ -63,10 +66,30 @@ paymentFollowUpRouter.post(
         preview.validations.filter((validation) => validation.blocking && !validation.passed),
       );
     }
-    const result = await persistPaymentTestAndSchedule(preview, request.auth?.userId);
-    response.status(result.duplicate ? 200 : 202).json({
+    const cycleId = randomUUID();
+    const paymentCase = await preparePaymentEndToEndTest(
+      preview,
+      cycleId,
+      request.auth?.userId,
+    );
+    const invoiceDelivery = await persistControlledInvoiceResendAndEnqueue(
+      preview.candidate,
+      preview.recipient,
+      cycleId,
+      request.auth?.userId,
+    );
+    setImmediate(() => {
+      void processDeliveryQueue();
+    });
+    response.status(202).json({
       data: {
-        ...result,
+        ...paymentCase,
+        jobId: invoiceDelivery.jobId,
+        duplicate: invoiceDelivery.duplicate,
+        status: 'invoice_queued',
+        testCycleId: cycleId,
+        firstReminderDelaySeconds: env.PAYMENT_FIRST_REMINDER_DELAY_SECONDS,
+        repeatReminderDelaySeconds: env.PAYMENT_REPEAT_REMINDER_DELAY_SECONDS,
         invoice: preview.candidate.billingDocument,
         customer: preview.candidate.customer.displayName,
         outstandingAmount: preview.receivable.outstandingAmount,

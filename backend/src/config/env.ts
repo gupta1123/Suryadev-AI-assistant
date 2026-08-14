@@ -47,7 +47,7 @@ const envSchema = z.object({
   PAYMENT_TEST_OUTSTANDING_AMOUNT: z.coerce.number().positive().optional(),
   MSG91_PAYMENT_TEMPLATE_NAME: z.string().min(1).default('payment_reminder_v1'),
   MSG91_PAYMENT_TEMPLATE_LANGUAGE: z.string().min(1).default('en'),
-  PAYMENT_FIRST_REMINDER_DELAY_SECONDS: z.coerce.number().int().min(5).max(86400).default(60),
+  PAYMENT_FIRST_REMINDER_DELAY_SECONDS: z.coerce.number().int().min(5).max(86400).default(120),
   PAYMENT_REPEAT_REMINDER_DELAY_SECONDS: z.coerce.number().int().min(5).max(604800).default(604800),
   PAYMENT_TEST_MAX_REMINDERS: z.coerce.number().int().min(1).max(10).default(2),
   PAYMENT_SCHEDULER_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).max(60000).default(5000),

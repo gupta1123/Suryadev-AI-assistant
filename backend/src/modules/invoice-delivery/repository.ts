@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { env } from '../../config/env.js';
 import { HttpError } from '../../lib/http.js';
@@ -15,6 +16,7 @@ export type PersistedInvoice = {
 
 export type ClaimedJob = {
   id: number;
+  job_type: 'invoice_delivery' | 'manual_resend' | 'payment_reminder';
   customer_id: number;
   primary_invoice_id: number;
   payment_follow_up_case_id: number | null;
@@ -66,6 +68,9 @@ export async function persistInvoiceAndEnqueue(
     source: 'fixture' | 'sap';
     triggerType: 'manual' | 'scheduled';
     startedBy?: string;
+    jobType?: 'invoice_delivery' | 'manual_resend';
+    idempotencyKey?: string;
+    metadata?: Record<string, unknown>;
   },
 ): Promise<PersistedDelivery> {
   const client = getSupabaseServerClient();
@@ -74,13 +79,14 @@ export async function persistInvoiceAndEnqueue(
   try {
     const persisted = await persistInvoiceRecord(client, candidate, options.source);
     const templateId = await findTemplateId(client);
-    const idempotencyKey = createDeliveryIdempotencyKey(candidate, recipient);
+    const idempotencyKey =
+      options.idempotencyKey ?? createDeliveryIdempotencyKey(candidate, recipient);
 
     const { data: insertedJob, error: jobError } = await client
       .from('communication_jobs')
       .insert({
         agent_run_id: runId,
-        job_type: 'invoice_delivery',
+        job_type: options.jobType ?? 'invoice_delivery',
         customer_id: persisted.customerId,
         primary_invoice_id: persisted.invoiceId,
         contact_id: persisted.contactId,
@@ -98,6 +104,7 @@ export async function persistInvoiceAndEnqueue(
           masked_recipient: maskPhone(recipient),
           document_id: persisted.documentId,
           document_path: persisted.documentPath,
+          ...options.metadata,
         },
       })
       .select('id,status')
@@ -137,6 +144,30 @@ export async function persistInvoiceAndEnqueue(
   }
 }
 
+export async function persistControlledInvoiceResendAndEnqueue(
+  candidate: InvoiceCandidate,
+  recipient: string,
+  cycleId: string,
+  startedBy?: string,
+): Promise<PersistedDelivery> {
+  const idempotencyKey = createHash('sha256')
+    .update(`payment-e2e-invoice:${candidate.billingDocument}:${recipient}:${cycleId}`)
+    .digest('hex');
+  return persistInvoiceAndEnqueue(candidate, recipient, {
+    source: 'sap',
+    triggerType: 'manual',
+    startedBy,
+    jobType: 'manual_resend',
+    idempotencyKey,
+    metadata: {
+      controlled_test: true,
+      payment_e2e_test: true,
+      payment_test_cycle_id: cycleId,
+      handoff: 'invoice_accepted_to_payment_schedule',
+    },
+  });
+}
+
 export type CursorPage<T> = {
   items: T[];
   nextCursor: number | null;
@@ -151,9 +182,9 @@ export async function listDeliveryJobsPage(
   let query = client
     .from('communication_jobs')
     .select(
-      'id,status,attempt_count,max_attempts,scheduled_at,completed_at,last_error,metadata,customers(display_name),invoices!communication_jobs_primary_invoice_id_fkey(sap_billing_document,billing_document_date,transaction_currency,total_gross_amount),messages(id,status,provider_message_id,sent_at,delivered_at,read_at,failed_at)',
+      'id,job_type,status,attempt_count,max_attempts,scheduled_at,completed_at,last_error,metadata,customers(display_name),invoices!communication_jobs_primary_invoice_id_fkey(sap_billing_document,billing_document_date,transaction_currency,total_gross_amount),messages(id,status,provider_message_id,sent_at,delivered_at,read_at,failed_at)',
     )
-    .eq('job_type', 'invoice_delivery')
+    .in('job_type', ['invoice_delivery', 'manual_resend'])
     .order('id', { ascending: false })
     .limit(pageSize + 1);
   if (beforeId) query = query.lt('id', beforeId);
@@ -199,7 +230,7 @@ export async function getDeliveryJob(jobId: number): Promise<Record<string, unkn
           provider_template_id,version,status,required_variables,created_at,updated_at)`,
       )
       .eq('id', jobId)
-      .eq('job_type', 'invoice_delivery')
+      .in('job_type', ['invoice_delivery', 'manual_resend'])
       .single(),
     'Delivery job not found',
     404,
@@ -275,12 +306,15 @@ export async function getDeliveryJob(jobId: number): Promise<Record<string, unkn
 }
 
 export async function claimNextDeliveryJob(workerName: string): Promise<ClaimedJob | null> {
-  return claimNextCommunicationJob(workerName, 'invoice_delivery');
+  return (
+    (await claimNextCommunicationJob(workerName, 'invoice_delivery')) ??
+    claimNextCommunicationJob(workerName, 'manual_resend')
+  );
 }
 
 export async function claimNextCommunicationJob(
   workerName: string,
-  jobType: 'invoice_delivery' | 'payment_reminder',
+  jobType: 'invoice_delivery' | 'manual_resend' | 'payment_reminder',
 ): Promise<ClaimedJob | null> {
   const client = getSupabaseServerClient();
   const { data, error } = await client.rpc('claim_next_communication_job', {
@@ -1137,7 +1171,7 @@ async function claimSapPollingCheckpointFallback(
 async function claimWithOptimisticFallback(
   client: SupabaseClient,
   workerName: string,
-  jobType: 'invoice_delivery' | 'payment_reminder',
+  jobType: 'invoice_delivery' | 'manual_resend' | 'payment_reminder',
 ): Promise<ClaimedJob | null> {
   const cutoff = new Date(Date.now() - env.JOB_LOCK_TIMEOUT_MINUTES * 60_000).toISOString();
   await client
@@ -1177,6 +1211,7 @@ async function claimWithOptimisticFallback(
 function asClaimedJob(row: Record<string, unknown>): ClaimedJob {
   return {
     id: Number(row.id),
+    job_type: String(row.job_type) as ClaimedJob['job_type'],
     customer_id: Number(row.customer_id),
     primary_invoice_id: Number(row.primary_invoice_id),
     payment_follow_up_case_id:
