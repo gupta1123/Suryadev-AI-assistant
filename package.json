@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "concurrently -n frontend,backend -c cyan,magenta \"npm run dev -w frontend\" \"npm run dev -w backend\"",
     "build": "npm run build -w backend && npm run build -w frontend",
+    "start": "npm run start -w backend",
     "typecheck": "npm run typecheck -w backend && npm run typecheck -w frontend",
     "test": "npm test -w backend",
     "supabase:start": "supabase start",
