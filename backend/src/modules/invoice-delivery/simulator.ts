@@ -22,7 +22,7 @@ export function createSimulatedSapFixture(
 ): SapInvoiceFixture {
   const fixture = structuredClone(baseFixture);
   const billingDocument = nextBillingDocument(now);
-  const invoiceDate = now.toISOString().slice(0, 10);
+  const invoiceDate = dateInIndia(now);
   const midnightUtc = Date.parse(`${invoiceDate}T00:00:00Z`);
   const billing = fixture.responses.billingDocument.d.results[0];
   const partner = fixture.responses.businessPartner.d.results[0];
@@ -58,6 +58,17 @@ export function createSimulatedSapFixture(
   });
 
   return sapInvoiceFixtureSchema.parse(fixture);
+}
+
+export function dateInIndia(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
 }
 
 function nextBillingDocument(now: Date): string {

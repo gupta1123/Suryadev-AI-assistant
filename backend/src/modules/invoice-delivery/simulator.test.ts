@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { FixtureInvoiceSource, normalizeFixture } from './fixture-source.js';
-import { createSimulatedSapFixture } from './simulator.js';
+import { createSimulatedSapFixture, dateInIndia } from './simulator.js';
 
 describe('invoice simulator', () => {
   it('creates a fresh SAP-shaped invoice for every click', async () => {
@@ -36,5 +36,12 @@ describe('invoice simulator', () => {
     assert.equal(pdf.startsWith('%PDF-1.4'), true);
     assert.equal(pdf.includes(`Invoice: ${candidate.billingDocument}`), true);
     assert.equal(candidate.pdf.fileName, `TEST-Invoice-${candidate.billingDocument}.pdf`);
+  });
+
+  it('uses the current Indian business date near the UTC day boundary', () => {
+    assert.equal(
+      dateInIndia(new Date('2026-08-13T20:00:00.000Z')),
+      '2026-08-14',
+    );
   });
 });
