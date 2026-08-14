@@ -296,11 +296,140 @@ export type HelpRequestPage = CursorPage<HelpRequest> & {
   counts: Record<'all' | HelpRequestStatus, number>;
 };
 
+export type PaymentFollowUpConfig = {
+  enabled: boolean;
+  sendEnabled: boolean;
+  controlledTest: boolean;
+  configured: boolean;
+  invoiceSource: 'sap';
+  receivableSource: 'test_fixture' | 'sap';
+  testCustomer: string;
+  testInvoice: string;
+  testDueDate?: string;
+  maskedRecipient: string;
+  templateName: string;
+  firstReminderDelaySeconds: number;
+  repeatReminderDelaySeconds: number;
+  maximumTestReminders: number;
+  deploymentAllowed: boolean;
+};
+
+export type PaymentTestPreview = {
+  mode: 'controlled_test';
+  invoiceSource: 'sap';
+  receivableSource: 'test_fixture';
+  invoice: {
+    billingDocument: string;
+    billingDocumentDate: string;
+    customerName: string;
+    customerNumber: string;
+    currency: string;
+    totalGrossAmount: number;
+    accountingPostingStatus?: string;
+  };
+  receivable: {
+    source: 'test_fixture';
+    originalAmount: number;
+    outstandingAmount: number;
+    paidAmount: number;
+    currency: string;
+    dueDate: string;
+    paymentStatus: string;
+    agingBucket: string;
+    daysOverdue: number;
+  };
+  maskedRecipient: string;
+  template: {
+    name: string;
+    language: string;
+    approved: boolean;
+    message: string;
+  };
+  validations: Validation[];
+  sendAllowed: boolean;
+  disclosure: string;
+};
+
+export type PaymentReminderMessage = {
+  id: number;
+  status: string;
+  body?: string | null;
+  provider_message_id?: string | null;
+  sent_at?: string | null;
+  delivered_at?: string | null;
+  failed_at?: string | null;
+  failure_reason?: string | null;
+  message_attempts?: MessageAttempt[];
+};
+
+export type PaymentReminderJob = {
+  id: number;
+  status: string;
+  attempt_count: number;
+  max_attempts?: number;
+  last_error?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+  messages?: PaymentReminderMessage | PaymentReminderMessage[];
+};
+
+export type PaymentFollowUpCase = {
+  id: number;
+  invoice_id: number;
+  status: string;
+  next_action_at?: string | null;
+  last_reminder_at?: string | null;
+  resolved_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  customer: {
+    id: number;
+    sap_customer_number: string;
+    display_name: string;
+  } | null;
+  invoice: {
+    id: number;
+    sap_billing_document: string;
+    billing_document_date: string;
+    transaction_currency: string;
+    total_gross_amount: number;
+  } | null;
+  receivable: {
+    invoice_id: number;
+    original_amount: number;
+    outstanding_amount: number;
+    paid_amount: number;
+    currency: string;
+    due_date: string;
+    payment_status: string;
+    aging_bucket: string;
+    days_overdue: number;
+    last_synced_at: string;
+  } | null;
+  latestJob: PaymentReminderJob | null;
+  jobs?: PaymentReminderJob[];
+};
+
+export type PaymentTestRunResult = {
+  caseId: number;
+  jobId: number | null;
+  duplicate: boolean;
+  status: string;
+  invoice: string;
+  customer: string;
+  outstandingAmount: number;
+  currency: string;
+  dueDate: string;
+  maskedRecipient: string;
+};
+
 export type AppRoute =
   | { page: 'overview' }
   | { page: 'deliveries' }
   | { page: 'delivery'; jobId: number }
-  | { page: 'helpRequests' };
+  | { page: 'helpRequests' }
+  | { page: 'paymentFollowUps' }
+  | { page: 'paymentFollowUp'; caseId: number };
 
 export function relationOne<T>(value: T | T[] | undefined): T | undefined {
   return Array.isArray(value) ? value[0] : value;

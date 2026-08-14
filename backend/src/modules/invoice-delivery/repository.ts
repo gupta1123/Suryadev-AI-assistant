@@ -5,7 +5,7 @@ import { getSupabaseServerClient } from '../../lib/supabase.js';
 import type { InvoiceCandidate, PersistedDelivery } from './domain.js';
 import { createDeliveryIdempotencyKey, maskPhone } from './policy.js';
 
-type PersistedInvoice = {
+export type PersistedInvoice = {
   customerId: number;
   contactId: number;
   invoiceId: number;
@@ -17,6 +17,7 @@ export type ClaimedJob = {
   id: number;
   customer_id: number;
   primary_invoice_id: number;
+  payment_follow_up_case_id: number | null;
   contact_id: number | null;
   template_id: number | null;
   status: string;
@@ -71,7 +72,7 @@ export async function persistInvoiceAndEnqueue(
   const runId = await createAgentRun(client, options);
 
   try {
-    const persisted = await persistInvoice(client, candidate, options.source);
+    const persisted = await persistInvoiceRecord(client, candidate, options.source);
     const templateId = await findTemplateId(client);
     const idempotencyKey = createDeliveryIdempotencyKey(candidate, recipient);
 
@@ -274,9 +275,17 @@ export async function getDeliveryJob(jobId: number): Promise<Record<string, unkn
 }
 
 export async function claimNextDeliveryJob(workerName: string): Promise<ClaimedJob | null> {
+  return claimNextCommunicationJob(workerName, 'invoice_delivery');
+}
+
+export async function claimNextCommunicationJob(
+  workerName: string,
+  jobType: 'invoice_delivery' | 'payment_reminder',
+): Promise<ClaimedJob | null> {
   const client = getSupabaseServerClient();
   const { data, error } = await client.rpc('claim_next_communication_job', {
     worker_name: workerName,
+    requested_job_type: jobType,
   });
 
   if (!error) {
@@ -288,7 +297,7 @@ export async function claimNextDeliveryJob(workerName: string): Promise<ClaimedJ
     throw new Error(`Unable to claim a delivery job: ${error.message}`);
   }
 
-  return claimWithOptimisticFallback(client, workerName);
+  return claimWithOptimisticFallback(client, workerName, jobType);
 }
 
 export async function getDeliveryJobContext(job: ClaimedJob): Promise<DeliveryJobContext> {
@@ -341,7 +350,13 @@ export async function createInvoiceDocumentUrl(
   return data.signedUrl;
 }
 
-export async function getOrCreateMessage(context: DeliveryJobContext): Promise<{
+export async function getOrCreateMessage(
+  context: DeliveryJobContext,
+  options: {
+    purpose?: 'invoice_delivery' | 'payment_reminder';
+    body?: string;
+  } = {},
+): Promise<{
   id: number;
   status: string;
 }> {
@@ -364,8 +379,8 @@ export async function getOrCreateMessage(context: DeliveryJobContext): Promise<{
         provider_integration_id: context.providerIntegrationId,
         direction: 'outbound',
         channel: 'whatsapp',
-        purpose: 'invoice_delivery',
-        body: `Invoice ${context.invoice.sap_billing_document}`,
+        purpose: options.purpose ?? 'invoice_delivery',
+        body: options.body ?? `Invoice ${context.invoice.sap_billing_document}`,
         status: 'created',
         metadata: {
           source: String(context.metadata.source ?? 'unknown'),
@@ -763,7 +778,7 @@ export async function applyProviderDeliveryStatus(input: {
   return true;
 }
 
-async function persistInvoice(
+export async function persistInvoiceRecord(
   client: SupabaseClient,
   candidate: InvoiceCandidate,
   source: 'fixture' | 'sap',
@@ -1122,6 +1137,7 @@ async function claimSapPollingCheckpointFallback(
 async function claimWithOptimisticFallback(
   client: SupabaseClient,
   workerName: string,
+  jobType: 'invoice_delivery' | 'payment_reminder',
 ): Promise<ClaimedJob | null> {
   const cutoff = new Date(Date.now() - env.JOB_LOCK_TIMEOUT_MINUTES * 60_000).toISOString();
   await client
@@ -1133,7 +1149,7 @@ async function claimWithOptimisticFallback(
   const { data: candidate, error: lookupError } = await client
     .from('communication_jobs')
     .select('*')
-    .eq('job_type', 'invoice_delivery')
+    .eq('job_type', jobType)
     .in('status', ['pending', 'queued'])
     .lte('available_at', new Date().toISOString())
     .order('available_at', { ascending: true })
@@ -1163,6 +1179,8 @@ function asClaimedJob(row: Record<string, unknown>): ClaimedJob {
     id: Number(row.id),
     customer_id: Number(row.customer_id),
     primary_invoice_id: Number(row.primary_invoice_id),
+    payment_follow_up_case_id:
+      row.payment_follow_up_case_id === null ? null : Number(row.payment_follow_up_case_id),
     contact_id: row.contact_id === null ? null : Number(row.contact_id),
     template_id: row.template_id === null ? null : Number(row.template_id),
     status: String(row.status),

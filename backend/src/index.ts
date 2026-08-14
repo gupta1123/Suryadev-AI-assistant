@@ -12,6 +12,14 @@ import {
   startMsg91StatusPoller,
   stopMsg91StatusPoller,
 } from './modules/invoice-delivery/msg91-status.js';
+import {
+  startPaymentFollowUpWorker,
+  stopPaymentFollowUpWorker,
+} from './modules/payment-follow-up/worker.js';
+import {
+  startPaymentFollowUpScheduler,
+  stopPaymentFollowUpScheduler,
+} from './modules/payment-follow-up/scheduler.js';
 
 const server = app.listen(env.PORT, () => {
   console.log(`SuryaDev API listening on http://localhost:${env.PORT}`);
@@ -21,6 +29,8 @@ if (isSupabaseServiceConfigured) {
   startDeliveryWorker();
   startSapInvoicePoller();
   startMsg91StatusPoller();
+  startPaymentFollowUpWorker();
+  startPaymentFollowUpScheduler();
 }
 
 function shutdown(signal: string) {
@@ -28,6 +38,8 @@ function shutdown(signal: string) {
   stopDeliveryWorker();
   stopSapInvoicePoller();
   stopMsg91StatusPoller();
+  stopPaymentFollowUpScheduler();
+  stopPaymentFollowUpWorker();
   server.close((error) => {
     if (error) {
       console.error('Failed to close HTTP server', error);

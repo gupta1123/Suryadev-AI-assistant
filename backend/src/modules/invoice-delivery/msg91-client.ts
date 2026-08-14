@@ -3,6 +3,8 @@ import type { Msg91TemplateInput } from './domain.js';
 
 const MSG91_TEMPLATE_URL =
   'https://control.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/';
+const MSG91_GET_TEMPLATE_URL =
+  'https://control.msg91.com/api/v5/whatsapp/get-template-client/';
 
 export type Msg91SendResult = {
   ok: boolean;
@@ -12,6 +14,48 @@ export type Msg91SendResult = {
   providerMessageId?: string;
   ambiguous: boolean;
 };
+
+export type Msg91PaymentReminderInput = {
+  recipient: string;
+  customerName: string;
+  outstandingAmount: string;
+  billingDocument: string;
+  billingDocumentDate: string;
+  teamName: string;
+};
+
+export async function isPaymentReminderTemplateApproved(
+  timeoutMs = 20_000,
+): Promise<boolean> {
+  if (!env.MSG91_AUTHKEY || !digitsOnly(env.MSG91_INTEGRATED_NUMBER)) return false;
+  const url = new URL(`${MSG91_GET_TEMPLATE_URL}${digitsOnly(env.MSG91_INTEGRATED_NUMBER)}`);
+  url.searchParams.set('template_name', env.MSG91_PAYMENT_TEMPLATE_NAME);
+  url.searchParams.set('template_status', 'approved');
+  url.searchParams.set('template_language', env.MSG91_PAYMENT_TEMPLATE_LANGUAGE);
+  url.searchParams.set('pagination', 'true');
+  url.searchParams.set('page_size', '10');
+  url.searchParams.set('page_num', '1');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      headers: {
+        accept: 'application/json',
+        authkey: env.MSG91_AUTHKEY,
+        'content-type': 'text/plain',
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) return false;
+    const body = await response.json().catch(() => ({}));
+    return findApprovedTemplate(body);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') return false;
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 export function buildMsg91InvoicePayload(input: Msg91TemplateInput): Record<string, unknown> {
   return {
@@ -47,6 +91,37 @@ export function buildMsg91InvoicePayload(input: Msg91TemplateInput): Record<stri
   };
 }
 
+export function buildMsg91PaymentReminderPayload(
+  input: Msg91PaymentReminderInput,
+): Record<string, unknown> {
+  return {
+    integrated_number: digitsOnly(env.MSG91_INTEGRATED_NUMBER),
+    content_type: 'template',
+    payload: {
+      type: 'template',
+      template: {
+        name: env.MSG91_PAYMENT_TEMPLATE_NAME,
+        language: {
+          code: env.MSG91_PAYMENT_TEMPLATE_LANGUAGE,
+          policy: 'deterministic',
+        },
+        to_and_components: [
+          {
+            to: [digitsOnly(input.recipient)],
+            components: {
+              body_1: { type: 'text', value: input.customerName },
+              body_2: { type: 'text', value: input.outstandingAmount },
+              body_3: { type: 'text', value: input.billingDocument },
+              body_4: { type: 'text', value: input.billingDocumentDate },
+              body_5: { type: 'text', value: input.teamName },
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
 export async function sendInvoiceTemplate(
   input: Msg91TemplateInput,
   timeoutMs = 20_000,
@@ -58,6 +133,26 @@ export async function sendInvoiceTemplate(
     throw new Error('MSG91 real sending is disabled');
   }
 
+  return sendTemplatePayload(buildMsg91InvoicePayload(input), timeoutMs);
+}
+
+export async function sendPaymentReminderTemplate(
+  input: Msg91PaymentReminderInput,
+  timeoutMs = 20_000,
+): Promise<Msg91SendResult> {
+  if (!env.MSG91_AUTHKEY || !digitsOnly(env.MSG91_INTEGRATED_NUMBER)) {
+    throw new Error('MSG91 is not configured');
+  }
+  if (!env.MSG91_SEND_ENABLED || !env.PAYMENT_FOLLOW_UP_SEND_ENABLED) {
+    throw new Error('Payment reminder sending is disabled');
+  }
+  return sendTemplatePayload(buildMsg91PaymentReminderPayload(input), timeoutMs);
+}
+
+async function sendTemplatePayload(
+  payload: Record<string, unknown>,
+  timeoutMs: number,
+): Promise<Msg91SendResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -69,7 +164,7 @@ export async function sendInvoiceTemplate(
         authkey: env.MSG91_AUTHKEY,
         'content-type': 'application/json',
       },
-      body: JSON.stringify(buildMsg91InvoicePayload(input)),
+      body: JSON.stringify(payload),
       signal: controller.signal,
     });
     const body = await readResponseBody(response);
@@ -165,6 +260,17 @@ function findStringByKeys(value: unknown, keys: string[]): string | undefined {
     if (found) return found;
   }
   return undefined;
+}
+
+function findApprovedTemplate(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(findApprovedTemplate);
+  if (!isRecord(value)) return false;
+  if (
+    value.name === env.MSG91_PAYMENT_TEMPLATE_NAME &&
+    value.language === env.MSG91_PAYMENT_TEMPLATE_LANGUAGE &&
+    String(value.status ?? '').toLowerCase() === 'approved'
+  ) return true;
+  return Object.values(value).some(findApprovedTemplate);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

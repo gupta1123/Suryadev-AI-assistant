@@ -18,6 +18,8 @@ import { DeliveriesPage } from './pages/DeliveriesPage';
 import { DeliveryDetailPage } from './pages/DeliveryDetailPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { HelpRequestsPage } from './pages/HelpRequestsPage';
+import { PaymentFollowUpsPage } from './pages/PaymentFollowUpsPage';
+import { PaymentFollowUpDetailPage } from './pages/PaymentFollowUpDetailPage';
 import type { AdminUser, AppRoute } from './types';
 
 type AuthResponse = { user: AdminUser; expiresAt: string };
@@ -180,6 +182,31 @@ function Router({
     );
   }
 
+  if (route.page === 'paymentFollowUps') {
+    return (
+      <PaymentFollowUpsPage
+        route={route}
+        onNavigate={navigate}
+        user={user}
+        onLogout={onLogout}
+        loggingOut={loggingOut}
+      />
+    );
+  }
+
+  if (route.page === 'paymentFollowUp' && route.caseId) {
+    return (
+      <PaymentFollowUpDetailPage
+        route={route}
+        caseId={route.caseId}
+        onNavigate={navigate}
+        user={user}
+        onLogout={onLogout}
+        loggingOut={loggingOut}
+      />
+    );
+  }
+
   return (
     <OverviewPage
       route={route}
@@ -192,10 +219,13 @@ function Router({
 }
 
 function parseRoute(pathname: string): AppRoute {
+  const paymentCaseMatch = pathname.match(/^\/payment-follow-ups\/(\d+)\/?$/);
+  if (paymentCaseMatch) return { page: 'paymentFollowUp', caseId: Number(paymentCaseMatch[1]) };
   const deliveryMatch = pathname.match(/^\/deliveries\/(\d+)\/?$/);
   if (deliveryMatch) return { page: 'delivery', jobId: Number(deliveryMatch[1]) };
   if (/^\/deliveries\/?$/.test(pathname)) return { page: 'deliveries' };
   if (/^\/help-requests\/?$/.test(pathname)) return { page: 'helpRequests' };
+  if (/^\/payment-follow-ups\/?$/.test(pathname)) return { page: 'paymentFollowUps' };
   return { page: 'overview' };
 }
 

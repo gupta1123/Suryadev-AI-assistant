@@ -1,4 +1,4 @@
-import { FileText, LayoutDashboard, LifeBuoy, LogOut, Send } from 'lucide-react';
+import { BadgeIndianRupee, FileText, LayoutDashboard, LifeBuoy, LogOut, Send } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { AdminUser, AppRoute, DeliveryConfig } from '../types';
 
@@ -34,6 +34,7 @@ export function AppShell({
   const overviewActive = route.page === 'overview';
   const deliveriesActive = route.page === 'deliveries' || route.page === 'delivery';
   const helpRequestsActive = route.page === 'helpRequests';
+  const paymentsActive = route.page === 'paymentFollowUps' || route.page === 'paymentFollowUp';
   const environmentReady = config?.invoiceSource === 'sap'
     ? config.sapPollingReady
     : config?.simulationReady;
@@ -58,6 +59,10 @@ export function AppShell({
           <button className={`nav-link ${helpRequestsActive ? 'nav-link--active' : ''}`} type="button" onClick={() => onNavigate('/help-requests')}>
             <LifeBuoy size={18} aria-hidden="true" />
             Help requests
+          </button>
+          <button className={`nav-link ${paymentsActive ? 'nav-link--active' : ''}`} type="button" onClick={() => onNavigate('/payment-follow-ups')}>
+            <BadgeIndianRupee size={18} aria-hidden="true" />
+            Payment follow-ups
           </button>
         </nav>
 
@@ -90,7 +95,7 @@ export function AppShell({
         {children}
       </main>
 
-      <nav className={`mobile-nav ${onNewDelivery ? 'mobile-nav--four' : ''}`} aria-label="Mobile navigation">
+      <nav className={`mobile-nav ${onNewDelivery ? 'mobile-nav--five' : 'mobile-nav--four'}`} aria-label="Mobile navigation">
         <button className={overviewActive ? 'mobile-nav--active' : ''} type="button" onClick={() => onNavigate('/')}>
           <LayoutDashboard size={19} aria-hidden="true" /> Overview
         </button>
@@ -99,6 +104,9 @@ export function AppShell({
         </button>
         <button className={helpRequestsActive ? 'mobile-nav--active' : ''} type="button" onClick={() => onNavigate('/help-requests')}>
           <LifeBuoy size={19} aria-hidden="true" /> Help
+        </button>
+        <button className={paymentsActive ? 'mobile-nav--active' : ''} type="button" onClick={() => onNavigate('/payment-follow-ups')}>
+          <BadgeIndianRupee size={19} aria-hidden="true" /> Payments
         </button>
         {onNewDelivery && (
           <button type="button" onClick={onNewDelivery}>

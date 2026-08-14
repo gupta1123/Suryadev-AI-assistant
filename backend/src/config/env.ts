@@ -36,6 +36,21 @@ const envSchema = z.object({
   MSG91_STATUS_POLL_INTERVAL_MS: z.coerce.number().int().min(5000).max(300000).default(15000),
   WHATSAPP_DEFAULT_TEST_RECIPIENT: z.string().default(''),
   WHATSAPP_TEST_RECIPIENTS: z.string().default(''),
+  PAYMENT_FOLLOW_UP_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+  PAYMENT_FOLLOW_UP_SEND_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+  PAYMENT_TEST_DEPLOYMENT_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+  PAYMENT_RECEIVABLE_SOURCE: z.enum(['test_fixture', 'sap']).default('test_fixture'),
+  PAYMENT_TEST_RECIPIENT: z.string().default(''),
+  PAYMENT_TEST_CUSTOMER: z.string().default(''),
+  PAYMENT_TEST_INVOICE: z.string().default(''),
+  PAYMENT_TEST_DUE_DATE: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  PAYMENT_TEST_OUTSTANDING_AMOUNT: z.coerce.number().positive().optional(),
+  MSG91_PAYMENT_TEMPLATE_NAME: z.string().min(1).default('payment_reminder_v1'),
+  MSG91_PAYMENT_TEMPLATE_LANGUAGE: z.string().min(1).default('en'),
+  PAYMENT_FIRST_REMINDER_DELAY_SECONDS: z.coerce.number().int().min(5).max(86400).default(60),
+  PAYMENT_REPEAT_REMINDER_DELAY_SECONDS: z.coerce.number().int().min(5).max(604800).default(604800),
+  PAYMENT_TEST_MAX_REMINDERS: z.coerce.number().int().min(1).max(10).default(2),
+  PAYMENT_SCHEDULER_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).max(60000).default(5000),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -86,4 +101,21 @@ export const isSapPollingConfigured = Boolean(
     env.SAP_POLL_ENABLED &&
     isSapConfigured &&
     sapAllowedCustomers.size > 0,
+);
+
+export const paymentTestRecipient = digitsOnly(env.PAYMENT_TEST_RECIPIENT);
+
+export const isPaymentFollowUpRuntimeAllowed = Boolean(
+  env.NODE_ENV !== 'production' || env.PAYMENT_TEST_DEPLOYMENT_ENABLED,
+);
+
+export const isPaymentFollowUpTestConfigured = Boolean(
+  isPaymentFollowUpRuntimeAllowed &&
+    env.DELIVERY_MODE === 'test' &&
+    env.PAYMENT_FOLLOW_UP_ENABLED &&
+    env.PAYMENT_RECEIVABLE_SOURCE === 'test_fixture' &&
+    env.PAYMENT_TEST_CUSTOMER &&
+    env.PAYMENT_TEST_INVOICE &&
+    env.PAYMENT_TEST_DUE_DATE &&
+    paymentTestRecipient,
 );
