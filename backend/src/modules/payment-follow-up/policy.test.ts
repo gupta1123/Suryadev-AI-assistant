@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   assertHardPaymentRecipient,
+  automaticPaymentCycleId,
   calculateAging,
   createPaymentReminderIdempotencyKey,
   createScheduledPaymentReminderIdempotencyKey,
@@ -22,6 +23,11 @@ describe('payment follow-up safety policy', () => {
     assert.equal(paymentReminderDelayMs(0, 60, 10), 60_000);
     assert.equal(paymentReminderDelayMs(1, 60, 10), 10_000);
     assert.equal(paymentReminderDelayMs(2, 60, 10), 10_000);
+  });
+
+  it('creates a deterministic automatic cycle for an invoice delivery job', () => {
+    assert.equal(automaticPaymentCycleId(42), 'automatic-invoice-job-42');
+    assert.throws(() => automaticPaymentCycleId(0), /Invalid invoice job identifier/);
   });
 
   it('classifies a receivable due today without overdue days', () => {

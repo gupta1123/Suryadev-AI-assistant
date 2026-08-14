@@ -6,6 +6,7 @@ import { persistInvoiceRecord } from '../invoice-delivery/repository.js';
 import type { PaymentTestPreview, PaymentTestRunResult } from './domain.js';
 import {
   assertHardPaymentRecipient,
+  automaticPaymentCycleId,
   createScheduledPaymentReminderIdempotencyKey,
   paymentReminderDelayMs,
   PAYMENT_HARD_TEST_RECIPIENT,
@@ -41,8 +42,28 @@ export async function preparePaymentEndToEndTest(
     .eq('invoice_id', invoice.invoiceId)
     .maybeSingle();
   if (existingCaseError) throw new Error(existingCaseError.message);
-  if (existingCase?.status === 'active') {
-    throw new HttpError(409, 'A controlled payment follow-up test is already active');
+  if (existingCase) {
+    const { data: existingReceivable, error: existingReceivableError } = await client
+      .from('invoice_receivables')
+      .select('raw_data')
+      .eq('invoice_id', invoice.invoiceId)
+      .maybeSingle();
+    if (existingReceivableError) throw new Error(existingReceivableError.message);
+    const existingMetadata =
+      existingReceivable && isRecord(existingReceivable.raw_data)
+        ? existingReceivable.raw_data
+        : {};
+    if (existingMetadata.payment_test_cycle_id === cycleId) {
+      return {
+        caseId: Number(existingCase.id),
+        jobId: null,
+        duplicate: true,
+        status: String(existingCase.status),
+      };
+    }
+    if (existingCase.status === 'active') {
+      throw new HttpError(409, 'A controlled payment follow-up test is already active');
+    }
   }
   const { data: pendingInvoiceJob, error: pendingInvoiceJobError } = await client
     .from('communication_jobs')
@@ -179,11 +200,17 @@ export async function activatePaymentTestAfterInvoiceSent(
     throw new Error(invoiceJobError?.message ?? 'Controlled invoice job was not found');
   }
   const jobMetadata = isRecord(invoiceJob.metadata) ? invoiceJob.metadata : {};
+  const isManualTestHandoff =
+    invoiceJob.job_type === 'manual_resend' &&
+    jobMetadata.payment_e2e_test === true &&
+    jobMetadata.payment_test_cycle_id === input.cycleId;
+  const isAutomaticInvoiceHandoff =
+    invoiceJob.job_type === 'invoice_delivery' &&
+    input.cycleId === automaticPaymentCycleId(Number(invoiceJob.id)) &&
+    String(jobMetadata.actual_recipient ?? '').replace(/\D/g, '') === preview.recipient;
   if (
-    invoiceJob.job_type !== 'manual_resend' ||
     invoiceJob.status !== 'completed' ||
-    jobMetadata.payment_e2e_test !== true ||
-    jobMetadata.payment_test_cycle_id !== input.cycleId
+    (!isManualTestHandoff && !isAutomaticInvoiceHandoff)
   ) {
     throw new Error('Payment follow-up activation refused an invalid invoice handoff');
   }
@@ -347,12 +374,78 @@ export async function getPaymentCase(caseId: number): Promise<Record<string, unk
   return { ...paymentCase, jobs: (jobs ?? []).map(sanitizeJob) };
 }
 
-export async function markPaymentReminderScheduledNext(
+export async function markPaymentReminderAwaitingSent(
   caseId: number,
   cycleId: string,
+  jobId: number,
 ): Promise<void> {
-  const now = new Date();
   const client = getSupabaseServerClient();
+  const { error } = await client
+    .from('payment_follow_up_cases')
+    .update({ status: 'paused', next_action_at: null, paused_until: null })
+    .eq('id', caseId);
+  if (error) throw new Error(`Unable to pause payment follow-up until sent status: ${error.message}`);
+  await client.from('audit_logs').insert({
+    actor_type: 'agent',
+    action: 'controlled_payment_reminder_awaiting_sent_status',
+    entity_type: 'payment_follow_up_case',
+    entity_id: String(caseId),
+    after_data: { reminder_job_id: jobId },
+    metadata: { controlled_test: true, payment_test_cycle_id: cycleId },
+  });
+}
+
+export async function scheduleNextPaymentReminderFromSentAt(
+  caseId: number,
+  cycleId: string,
+  jobId: number,
+  sentAt: string,
+): Promise<{ duplicate: boolean; capped: boolean; nextActionAt: string | null }> {
+  const parsedSentAt = Date.parse(sentAt);
+  if (!Number.isFinite(parsedSentAt)) throw new Error('Invalid payment reminder sent timestamp');
+  const client = getSupabaseServerClient();
+  const { data: job, error: jobError } = await client
+    .from('communication_jobs')
+    .select('id,job_type,payment_follow_up_case_id,status,metadata')
+    .eq('id', jobId)
+    .eq('job_type', 'payment_reminder')
+    .eq('payment_follow_up_case_id', caseId)
+    .single();
+  if (jobError || !job) {
+    throw new Error(jobError?.message ?? 'Payment reminder job was not found for sent handoff');
+  }
+  const jobMetadata = isRecord(job.metadata) ? job.metadata : {};
+  if (
+    job.status !== 'completed' ||
+    jobMetadata.payment_test_cycle_id !== cycleId
+  ) {
+    throw new Error('Payment reminder sent handoff failed its controlled test boundary');
+  }
+  const { data: paymentCase, error: caseError } = await client
+    .from('payment_follow_up_cases')
+    .select('id,last_reminder_at,next_action_at,status')
+    .eq('id', caseId)
+    .single();
+  if (caseError || !paymentCase) {
+    throw new Error(caseError?.message ?? 'Payment follow-up case was not found');
+  }
+  if (paymentCase.status === 'active' && paymentCase.next_action_at) {
+    return {
+      duplicate: true,
+      capped: false,
+      nextActionAt: String(paymentCase.next_action_at),
+    };
+  }
+  const previousSentAt = paymentCase.last_reminder_at
+    ? Date.parse(String(paymentCase.last_reminder_at))
+    : Number.NaN;
+  if (Number.isFinite(previousSentAt) && previousSentAt >= parsedSentAt) {
+    return {
+      duplicate: true,
+      capped: paymentCase.status === 'paused' && !paymentCase.next_action_at,
+      nextActionAt: paymentCase.next_action_at ? String(paymentCase.next_action_at) : null,
+    };
+  }
   const { count, error: countError } = await client
     .from('communication_jobs')
     .select('id', { count: 'exact', head: true })
@@ -362,17 +455,11 @@ export async function markPaymentReminderScheduledNext(
   if (countError) throw new Error(`Unable to count payment reminders: ${countError.message}`);
   const reminderCount = count ?? 0;
   const capped = reminderCount >= env.PAYMENT_TEST_MAX_REMINDERS;
-  const next = new Date(
-    now.getTime() + paymentReminderDelayMs(
-      reminderCount,
-      env.PAYMENT_FIRST_REMINDER_DELAY_SECONDS,
-      env.PAYMENT_REPEAT_REMINDER_DELAY_SECONDS,
-    ),
-  );
+  const next = new Date(parsedSentAt + env.PAYMENT_REPEAT_REMINDER_DELAY_SECONDS * 1000);
   const { error } = await client
     .from('payment_follow_up_cases')
     .update({
-      last_reminder_at: now.toISOString(),
+      last_reminder_at: new Date(parsedSentAt).toISOString(),
       next_action_at: capped ? null : next.toISOString(),
       status: capped ? 'paused' : 'active',
       paused_until: null,
@@ -386,11 +473,22 @@ export async function markPaymentReminderScheduledNext(
     entity_id: String(caseId),
     after_data: {
       reminder_count: reminderCount,
+      reminder_job_id: jobId,
+      reminder_sent_at: new Date(parsedSentAt).toISOString(),
       next_action_at: capped ? null : next.toISOString(),
       repeat_delay_seconds: env.PAYMENT_REPEAT_REMINDER_DELAY_SECONDS,
     },
-    metadata: { controlled_test: true, payment_test_cycle_id: cycleId },
+    metadata: {
+      controlled_test: true,
+      payment_test_cycle_id: cycleId,
+      reminder_job_id: jobId,
+    },
   });
+  return {
+    duplicate: false,
+    capped,
+    nextActionAt: capped ? null : next.toISOString(),
+  };
 }
 
 export async function preparePaymentTestSchedule(): Promise<void> {
@@ -640,13 +738,17 @@ export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleRe
 }
 
 function assertLocalPaymentSchedulerBoundary(): void {
+  try {
+    assertHardPaymentRecipient(PAYMENT_HARD_TEST_RECIPIENT);
+  } catch {
+    throw new Error('Scheduled payment reminders are disabled outside the single-recipient controlled test');
+  }
   if (
     (env.NODE_ENV === 'production' && !env.PAYMENT_TEST_DEPLOYMENT_ENABLED) ||
     env.DELIVERY_MODE !== 'test' ||
     !env.PAYMENT_FOLLOW_UP_ENABLED ||
     !env.PAYMENT_FOLLOW_UP_SEND_ENABLED ||
-    env.PAYMENT_RECEIVABLE_SOURCE !== 'test_fixture' ||
-    env.PAYMENT_TEST_RECIPIENT.replace(/\D/g, '') !== PAYMENT_HARD_TEST_RECIPIENT
+    env.PAYMENT_RECEIVABLE_SOURCE !== 'test_fixture'
   ) {
     throw new Error('Scheduled payment reminders are disabled outside the single-recipient controlled test');
   }

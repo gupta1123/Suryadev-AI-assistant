@@ -16,7 +16,7 @@ import {
   startMessageAttempt,
 } from '../invoice-delivery/repository.js';
 import { assertHardPaymentRecipient } from './policy.js';
-import { markPaymentReminderScheduledNext } from './repository.js';
+import { markPaymentReminderAwaitingSent } from './repository.js';
 
 let timer: NodeJS.Timeout | undefined;
 let running = false;
@@ -106,9 +106,10 @@ async function processClaimedPaymentJob(
         ...(result.providerRequestId ? { providerRequestId: result.providerRequestId } : {}),
         ...(result.providerMessageId ? { providerMessageId: result.providerMessageId } : {}),
       });
-      await markPaymentReminderScheduledNext(
+      await markPaymentReminderAwaitingSent(
         context.payment_follow_up_case_id,
         cycleId,
+        context.id,
       );
       return;
     }

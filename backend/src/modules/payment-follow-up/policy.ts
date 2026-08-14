@@ -7,12 +7,23 @@ import {
   isSapConfigured,
   isSupabaseServiceConfigured,
   paymentTestRecipient,
+  whatsappTestRecipients,
 } from '../../config/env.js';
 import type { InvoiceCandidate, ValidationResult } from '../invoice-delivery/domain.js';
 import { formatInvoiceAmount, formatInvoiceDate, maskPhone } from '../invoice-delivery/policy.js';
 import type { AgingBucket, PaymentTestPreview, TestReceivable } from './domain.js';
 
-export const PAYMENT_HARD_TEST_RECIPIENT = '919765723830';
+// This is intentionally resolved from the deployed environment instead of being
+// compiled to one person's number. The controlled test still permits exactly one
+// recipient at a time, and that recipient must also be on the WhatsApp test allowlist.
+export const PAYMENT_HARD_TEST_RECIPIENT = paymentTestRecipient;
+
+export function automaticPaymentCycleId(invoiceJobId: number): string {
+  if (!Number.isInteger(invoiceJobId) || invoiceJobId <= 0) {
+    throw new Error('Invalid invoice job identifier for automatic payment follow-up');
+  }
+  return `automatic-invoice-job-${invoiceJobId}`;
+}
 
 export function paymentReminderDelayMs(
   reminderCount: number,
@@ -81,7 +92,13 @@ export function buildPaymentPreview(
     validation('supabase_ready', 'Supabase audit storage is configured', isSupabaseServiceConfigured),
     validation('msg91_ready', 'MSG91 is configured', isMsg91Configured),
     validation('payment_send_enabled', 'Payment reminder sending is enabled for this controlled test', env.PAYMENT_FOLLOW_UP_SEND_ENABLED),
-    validation('recipient_locked', 'Recipient is the single approved test number', recipient === PAYMENT_HARD_TEST_RECIPIENT),
+    validation(
+      'recipient_locked',
+      'Recipient is the single approved and allowlisted test number',
+      Boolean(recipient) &&
+        recipient === PAYMENT_HARD_TEST_RECIPIENT &&
+        whatsappTestRecipients.has(recipient),
+    ),
     validation('customer_locked', 'SAP customer is the approved test customer', candidate.customer.customerNumber === env.PAYMENT_TEST_CUSTOMER),
     validation('invoice_locked', 'SAP invoice is the configured test invoice', candidate.billingDocument === env.PAYMENT_TEST_INVOICE),
     validation('sap_contact_matches', 'SAP customer phone matches the approved test number', candidate.contact.normalizedValue === PAYMENT_HARD_TEST_RECIPIENT),
@@ -134,7 +151,11 @@ export function createScheduledPaymentReminderIdempotencyKey(input: {
 }
 
 export function assertHardPaymentRecipient(recipient: string): void {
-  if (recipient !== PAYMENT_HARD_TEST_RECIPIENT) {
+  if (
+    !PAYMENT_HARD_TEST_RECIPIENT ||
+    recipient !== PAYMENT_HARD_TEST_RECIPIENT ||
+    !whatsappTestRecipients.has(recipient)
+  ) {
     throw new Error('Payment follow-up refused a recipient outside the single controlled test number');
   }
 }
