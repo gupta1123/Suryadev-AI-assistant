@@ -23,6 +23,7 @@ import { PaymentFollowUpDetailPage } from './pages/PaymentFollowUpDetailPage';
 import type { AdminUser, AppRoute } from './types';
 
 type AuthResponse = { user: AdminUser; expiresAt: string };
+const SESSION_EXPIRY_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 export default function App() {
   const [user, setUser] = useState<AdminUser | null>(null);
@@ -45,13 +46,22 @@ export default function App() {
 
   useEffect(() => {
     if (sessionExpiresAt === null) return;
-    const remainingMs = sessionExpiresAt - Date.now();
-    if (remainingMs <= 0) {
-      expireSession();
-      return;
-    }
-    const timeout = window.setTimeout(expireSession, remainingMs);
-    return () => window.clearTimeout(timeout);
+    let timeout: number | undefined;
+    const scheduleExpiryCheck = () => {
+      const remainingMs = sessionExpiresAt - Date.now();
+      if (remainingMs <= 0) {
+        expireSession();
+        return;
+      }
+      timeout = window.setTimeout(
+        scheduleExpiryCheck,
+        Math.min(remainingMs, SESSION_EXPIRY_CHECK_INTERVAL_MS),
+      );
+    };
+    scheduleExpiryCheck();
+    return () => {
+      if (timeout !== undefined) window.clearTimeout(timeout);
+    };
   }, [expireSession, sessionExpiresAt]);
 
   useEffect(() => {

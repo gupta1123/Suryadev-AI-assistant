@@ -20,15 +20,21 @@ describe('local administrator session', () => {
     assert.equal(verifyAdminCredentials('incorrect', env.ADMIN_PASSWORD), false);
   });
 
-  it('creates, resolves, expires and revokes opaque sessions', () => {
+  it('creates, resolves, expires and revokes signed sessions', () => {
     resetAdminSessions();
     const now = 1_000_000;
     const { token, session } = createAdminSession(now);
 
     assert.notEqual(token, env.ADMIN_PASSWORD);
-    assert.equal(session.expiresAt, now + (7 * 24 * 60 * 60 * 1000));
+    assert.equal(session.expiresAt, now + (env.AUTH_SESSION_HOURS * 60 * 60 * 1000));
     assert.equal(getAdminSession(token, now)?.user.username, env.ADMIN_USERNAME);
     assert.equal(getAdminSession(token, session.expiresAt), null);
+
+    resetAdminSessions();
+    assert.equal(getAdminSession(token, now)?.user.username, env.ADMIN_USERNAME);
+
+    const tamperedToken = `${token.slice(0, -1)}${token.endsWith('a') ? 'b' : 'a'}`;
+    assert.equal(getAdminSession(tamperedToken, now), null);
 
     const replacement = createAdminSession(now);
     revokeAdminSession(replacement.token);
@@ -40,7 +46,7 @@ describe('local administrator session', () => {
     assert.match(cookie, new RegExp(`^${SESSION_COOKIE_NAME}=opaque-token;`));
     assert.match(cookie, /HttpOnly/);
     assert.match(cookie, /SameSite=Strict/);
-    assert.match(cookie, /Max-Age=604800/);
+    assert.match(cookie, new RegExp(`Max-Age=${env.AUTH_SESSION_HOURS * 60 * 60}`));
     assert.equal(readSessionToken(`other=value; ${cookie}`), 'opaque-token');
     assert.match(clearSessionCookie(), /Max-Age=0/);
   });
