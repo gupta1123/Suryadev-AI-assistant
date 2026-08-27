@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import {
@@ -26,6 +27,9 @@ import {
   retryDeliveryJob,
 } from './repository.js';
 import { InvoiceSimulator } from './simulator.js';
+import { isPaymentReminderTemplateApproved } from './msg91-client.js';
+import { buildSimulatedPaymentPreview } from '../payment-follow-up/policy.js';
+import { preparePaymentEndToEndTest } from '../payment-follow-up/repository.js';
 import { pollSapInvoices } from './sap-poller.js';
 import { processDeliveryQueue } from './worker.js';
 import {
@@ -122,7 +126,7 @@ invoiceDeliveryRouter.post(
       );
     }
 
-    const candidate = await simulator.create();
+    const candidate = await simulator.create(new Date(), defaultWhatsappTestRecipient);
     const preview = buildInvoicePreview(candidate, defaultWhatsappTestRecipient);
     if (!preview.sendAllowed) {
       throw new HttpError(
@@ -132,6 +136,25 @@ invoiceDeliveryRouter.post(
       );
     }
 
+    const paymentCycleId = env.PAYMENT_SIMULATION_AUTO_FOLLOW_UP
+      ? `simulated-invoice-${candidate.billingDocument}-${randomUUID()}`
+      : '';
+    if (paymentCycleId) {
+      const paymentPreview = buildSimulatedPaymentPreview(
+        candidate,
+        await isPaymentReminderTemplateApproved(),
+        preview.actualRecipient,
+      );
+      if (!paymentPreview.sendAllowed) {
+        throw new HttpError(
+          409,
+          'Automatic payment follow-up preflight failed',
+          paymentPreview.validations.filter((item) => item.blocking && !item.passed),
+        );
+      }
+      await preparePaymentEndToEndTest(paymentPreview, paymentCycleId, request.auth?.userId);
+    }
+
     const job = await persistInvoiceAndEnqueue(
       candidate,
       preview.actualRecipient,
@@ -139,6 +162,17 @@ invoiceDeliveryRouter.post(
         source: env.INVOICE_SOURCE,
         triggerType: 'manual',
         startedBy: request.auth?.userId,
+        ...(paymentCycleId
+          ? {
+              metadata: {
+                controlled_test: true,
+                payment_e2e_test: true,
+                payment_simulation_test: true,
+                payment_test_cycle_id: paymentCycleId,
+                handoff: 'invoice_sent_to_payment_schedule',
+              },
+            }
+          : {}),
       },
     );
     setImmediate(() => {
@@ -154,6 +188,7 @@ invoiceDeliveryRouter.post(
         currency: candidate.currency,
         maskedRecipient: preview.maskedRecipient,
         pdfFileName: candidate.pdf.fileName,
+        paymentFollowUpAutomated: Boolean(paymentCycleId),
       },
     });
   }),

@@ -5,6 +5,7 @@ import {
 } from '../../config/env.js';
 import { getDeliveryJobContextById } from '../invoice-delivery/repository.js';
 import {
+  activatePreparedPaymentTestAfterInvoiceSent,
   activatePaymentTestAfterInvoiceSent,
   preparePaymentEndToEndTest,
   scheduleNextPaymentReminderFromSentAt,
@@ -24,11 +25,13 @@ export async function handOffSentInvoiceToPaymentSchedule(
 
   if (context.job_type === 'payment_reminder') {
     const cycleId = String(context.metadata.payment_test_cycle_id ?? '');
+    const isSimulatedPaymentTest = context.metadata.payment_simulation_test === true;
     if (
       !cycleId ||
       !context.payment_follow_up_case_id ||
       recipient !== PAYMENT_HARD_TEST_RECIPIENT ||
-      context.invoice.sap_billing_document !== env.PAYMENT_TEST_INVOICE
+      (!isSimulatedPaymentTest &&
+        context.invoice.sap_billing_document !== env.PAYMENT_TEST_INVOICE)
     ) {
       return;
     }
@@ -45,24 +48,42 @@ export async function handOffSentInvoiceToPaymentSchedule(
     context.job_type === 'manual_resend' &&
     context.metadata.payment_e2e_test === true;
   const isAutomaticInvoiceDelivery = context.job_type === 'invoice_delivery';
+  const isSimulatedInvoiceDelivery =
+    isAutomaticInvoiceDelivery &&
+    context.metadata.payment_simulation_test === true;
   if (!isManualTestResend && !isAutomaticInvoiceDelivery) return;
 
   if (isAutomaticInvoiceDelivery) {
     if (
-      !isPaymentFollowUpTestConfigured ||
+      (!isSimulatedInvoiceDelivery && !isPaymentFollowUpTestConfigured) ||
+      (isSimulatedInvoiceDelivery && !env.PAYMENT_SIMULATION_AUTO_FOLLOW_UP) ||
       !env.PAYMENT_FOLLOW_UP_SEND_ENABLED ||
       recipient !== PAYMENT_HARD_TEST_RECIPIENT ||
-      context.invoice.sap_billing_document !== env.PAYMENT_TEST_INVOICE
+      (!isSimulatedInvoiceDelivery &&
+        context.invoice.sap_billing_document !== env.PAYMENT_TEST_INVOICE)
     ) {
       return;
     }
   }
 
-  const cycleId = isAutomaticInvoiceDelivery
+  const cycleId = isSimulatedInvoiceDelivery
+    ? String(context.metadata.payment_test_cycle_id ?? '')
+    : isAutomaticInvoiceDelivery
     ? automaticPaymentCycleId(context.id)
     : String(context.metadata.payment_test_cycle_id ?? '');
   if (!cycleId || recipient !== PAYMENT_HARD_TEST_RECIPIENT) {
     throw new Error('Invoice-to-payment handoff failed its controlled test boundary');
+  }
+
+  if (isSimulatedInvoiceDelivery) {
+    await activatePreparedPaymentTestAfterInvoiceSent({
+      cycleId,
+      invoiceJobId: context.id,
+      invoiceId: context.invoice.id,
+      recipient,
+      sentAt,
+    });
+    return;
   }
 
   const preview = await getPaymentTestPreview();

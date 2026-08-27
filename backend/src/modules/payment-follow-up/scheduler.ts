@@ -1,4 +1,4 @@
-import { env, isPaymentFollowUpTestConfigured } from '../../config/env.js';
+import { env, isPaymentFollowUpSchedulerConfigured } from '../../config/env.js';
 import {
   enqueueNextDuePaymentReminder,
   preparePaymentTestSchedule,
@@ -11,7 +11,7 @@ let running = false;
 export function startPaymentFollowUpScheduler(): () => void {
   if (
     timer ||
-    !isPaymentFollowUpTestConfigured ||
+    !isPaymentFollowUpSchedulerConfigured ||
     !env.PAYMENT_FOLLOW_UP_SEND_ENABLED
   ) {
     return stopPaymentFollowUpScheduler;
@@ -30,7 +30,7 @@ export function stopPaymentFollowUpScheduler(): void {
 }
 
 export async function runPaymentFollowUpSchedule(): Promise<void> {
-  if (running || !isPaymentFollowUpTestConfigured || !env.PAYMENT_FOLLOW_UP_SEND_ENABLED) return;
+  if (running || !isPaymentFollowUpSchedulerConfigured || !env.PAYMENT_FOLLOW_UP_SEND_ENABLED) return;
   running = true;
   try {
     const result = await enqueueNextDuePaymentReminder();
@@ -51,7 +51,9 @@ export async function runPaymentFollowUpSchedule(): Promise<void> {
 
 async function initializeScheduler(): Promise<void> {
   try {
-    await preparePaymentTestSchedule();
+    if (!env.PAYMENT_SIMULATION_AUTO_FOLLOW_UP) {
+      await preparePaymentTestSchedule();
+    }
     console.log(
       `Controlled payment scheduler ready: first reminder after ${env.PAYMENT_FIRST_REMINDER_DELAY_SECONDS}s, repeats after ${env.PAYMENT_REPEAT_REMINDER_DELAY_SECONDS}s, ${env.PAYMENT_TEST_MAX_REMINDERS} reminder cap`,
     );

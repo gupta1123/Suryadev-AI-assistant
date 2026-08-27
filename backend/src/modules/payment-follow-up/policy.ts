@@ -61,9 +61,19 @@ export function calculateAging(
 }
 
 export function createTestReceivable(candidate: InvoiceCandidate): TestReceivable {
-  const outstandingAmount = env.PAYMENT_TEST_OUTSTANDING_AMOUNT ?? candidate.totalGrossAmount;
+  return createReceivable(candidate, {
+    dueDate: env.PAYMENT_TEST_DUE_DATE ?? '',
+    outstandingAmount: env.PAYMENT_TEST_OUTSTANDING_AMOUNT ?? candidate.totalGrossAmount,
+  });
+}
+
+function createReceivable(
+  candidate: InvoiceCandidate,
+  input: { dueDate: string; outstandingAmount: number },
+): TestReceivable {
+  const outstandingAmount = input.outstandingAmount;
   const originalAmount = candidate.totalGrossAmount;
-  const dueDate = env.PAYMENT_TEST_DUE_DATE ?? '';
+  const dueDate = input.dueDate;
   const { bucket, daysOverdue } = calculateAging(dueDate, outstandingAmount);
   return {
     source: 'test_fixture',
@@ -75,6 +85,57 @@ export function createTestReceivable(candidate: InvoiceCandidate): TestReceivabl
     paymentStatus: outstandingAmount < originalAmount ? 'partially_paid' : 'open',
     agingBucket: bucket,
     daysOverdue,
+  };
+}
+
+export function buildSimulatedPaymentPreview(
+  candidate: InvoiceCandidate,
+  templateApproved: boolean,
+  recipient: string,
+): PaymentTestPreview {
+  const receivable = createReceivable(candidate, {
+    dueDate: todayInIndia(),
+    outstandingAmount: candidate.totalGrossAmount,
+  });
+  const validations: ValidationResult[] = [
+    validation('controlled_runtime', 'Controlled test deployment is explicitly enabled', isPaymentFollowUpRuntimeAllowed),
+    validation('test_mode', 'Controlled test mode is enabled', env.DELIVERY_MODE === 'test'),
+    validation('payment_enabled', 'Payment follow-up is enabled', env.PAYMENT_FOLLOW_UP_ENABLED),
+    validation('supabase_ready', 'Supabase audit storage is configured', isSupabaseServiceConfigured),
+    validation('msg91_ready', 'MSG91 is configured', isMsg91Configured),
+    validation('payment_send_enabled', 'Payment reminder sending is enabled for this controlled test', env.PAYMENT_FOLLOW_UP_SEND_ENABLED),
+    validation(
+      'recipient_locked',
+      'Recipient is the single approved and allowlisted test number',
+      Boolean(recipient) &&
+        recipient === PAYMENT_HARD_TEST_RECIPIENT &&
+        whatsappTestRecipients.has(recipient),
+    ),
+    validation('fixture_contact_matches', 'Generated invoice contact matches the approved test number', candidate.contact.normalizedValue === recipient),
+    validation('invoice_active', 'Generated invoice is not cancelled', !candidate.isCancelled),
+    validation('currency_supported', 'Invoice currency is INR', candidate.currency === 'INR'),
+    validation('amount_valid', 'Outstanding amount is positive and not above invoice total', receivable.outstandingAmount > 0 && receivable.outstandingAmount <= candidate.totalGrossAmount),
+    validation('due_today', 'Test receivable is due today', receivable.dueDate === todayInIndia()),
+    validation('template_approved', 'MSG91 payment reminder template is approved', templateApproved),
+  ];
+  const formattedAmount = formatInvoiceAmount(receivable.outstandingAmount);
+  return {
+    mode: 'controlled_test',
+    invoiceSource: 'fixture',
+    receivableSource: 'test_fixture',
+    candidate,
+    receivable,
+    recipient,
+    maskedRecipient: maskPhone(recipient),
+    template: {
+      name: env.MSG91_PAYMENT_TEMPLATE_NAME,
+      language: env.MSG91_PAYMENT_TEMPLATE_LANGUAGE,
+      approved: templateApproved,
+      message: `Hello ${candidate.customer.displayName}, payment of ₹${formattedAmount} is pending against invoice ${candidate.billingDocument} dated ${formatInvoiceDate(candidate.billingDocumentDate)}.`,
+    },
+    validations,
+    sendAllowed: validations.every((item) => !item.blocking || item.passed),
+    disclosure: 'Invoice and receivable data are generated for this controlled end-to-end test. WhatsApp delivery is real and restricted to the approved test number.',
   };
 }
 

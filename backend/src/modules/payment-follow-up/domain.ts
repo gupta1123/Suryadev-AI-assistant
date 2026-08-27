@@ -17,7 +17,7 @@ export type TestReceivable = {
 
 export type PaymentTestPreview = {
   mode: 'controlled_test';
-  invoiceSource: 'sap';
+  invoiceSource: 'sap' | 'fixture';
   receivableSource: 'test_fixture';
   candidate: InvoiceCandidate;
   receivable: TestReceivable;

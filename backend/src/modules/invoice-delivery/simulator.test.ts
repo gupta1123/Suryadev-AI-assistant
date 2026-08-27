@@ -44,4 +44,14 @@ describe('invoice simulator', () => {
       '2026-08-14',
     );
   });
+
+  it('locks the generated invoice contact to the controlled test recipient', async () => {
+    const base = await new FixtureInvoiceSource().getRaw('sap-invoice-0090000001');
+    const fixture = createSimulatedSapFixture(
+      base,
+      new Date('2026-08-27T08:00:00.000Z'),
+      '917019339764',
+    );
+    assert.equal(normalizeFixture(fixture).contact.normalizedValue, '917019339764');
+  });
 });

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { digitsOnly, env, isPaymentFollowUpTestConfigured } from '../../config/env.js';
+import { digitsOnly, env, isPaymentFollowUpSchedulerConfigured } from '../../config/env.js';
 import {
   buildMsg91PaymentReminderPayload,
   sanitizeMsg91Payload,
@@ -61,7 +61,7 @@ export async function processPaymentFollowUpQueue(): Promise<void> {
 async function processClaimedPaymentJob(
   job: NonNullable<Awaited<ReturnType<typeof claimNextCommunicationJob>>>,
 ): Promise<void> {
-  if (!isPaymentFollowUpTestConfigured || env.DELIVERY_MODE !== 'test') {
+  if (!isPaymentFollowUpSchedulerConfigured || env.DELIVERY_MODE !== 'test') {
     throw new Error('Payment follow-up worker is disabled outside controlled test mode');
   }
   const context = await getDeliveryJobContext(job);

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { env } from '../../config/env.js';
+import { env, isPaymentFollowUpTestConfigured } from '../../config/env.js';
 import { HttpError } from '../../lib/http.js';
 import { getSupabaseServerClient } from '../../lib/supabase.js';
 import { persistInvoiceRecord } from '../invoice-delivery/repository.js';
@@ -35,7 +35,7 @@ export async function preparePaymentEndToEndTest(
 ): Promise<PaymentTestRunResult> {
   assertHardPaymentRecipient(preview.recipient);
   const client = getSupabaseServerClient();
-  const invoice = await persistInvoiceRecord(client, preview.candidate, 'sap');
+  const invoice = await persistInvoiceRecord(client, preview.candidate, preview.invoiceSource);
   const { data: existingCase, error: existingCaseError } = await client
     .from('payment_follow_up_cases')
     .select('id,status')
@@ -98,7 +98,11 @@ export async function preparePaymentEndToEndTest(
       raw_data: {
         source: 'test_fixture',
         environment: 'deployed_controlled_test',
-        reason: 'SAP receivables API is not authorized in QAS',
+        reason: preview.invoiceSource === 'sap'
+          ? 'SAP receivables API is not authorized in QAS'
+          : 'Controlled simulated receivable for automated delivery testing',
+        invoice_source: preview.invoiceSource,
+        approved_recipient: preview.recipient,
         payment_test_cycle_id: cycleId,
         payment_handoff: 'waiting_for_invoice_sent_status',
       },
@@ -189,12 +193,28 @@ export async function activatePaymentTestAfterInvoiceSent(
 ): Promise<{ caseId: number; firstActionAt: string; duplicate: boolean }> {
   assertHardPaymentRecipient(preview.recipient);
   const client = getSupabaseServerClient();
-  const invoice = await persistInvoiceRecord(client, preview.candidate, 'sap');
+  const invoice = await persistInvoiceRecord(client, preview.candidate, preview.invoiceSource);
+  return activatePreparedPaymentTestAfterInvoiceSent({
+    ...input,
+    invoiceId: invoice.invoiceId,
+    recipient: preview.recipient,
+  });
+}
+
+export async function activatePreparedPaymentTestAfterInvoiceSent(input: {
+  cycleId: string;
+  invoiceJobId: number;
+  invoiceId: number;
+  recipient: string;
+  sentAt: string;
+}): Promise<{ caseId: number; firstActionAt: string; duplicate: boolean }> {
+  assertHardPaymentRecipient(input.recipient);
+  const client = getSupabaseServerClient();
   const { data: invoiceJob, error: invoiceJobError } = await client
     .from('communication_jobs')
     .select('id,job_type,status,metadata')
     .eq('id', input.invoiceJobId)
-    .eq('primary_invoice_id', invoice.invoiceId)
+    .eq('primary_invoice_id', input.invoiceId)
     .single();
   if (invoiceJobError || !invoiceJob) {
     throw new Error(invoiceJobError?.message ?? 'Controlled invoice job was not found');
@@ -207,10 +227,15 @@ export async function activatePaymentTestAfterInvoiceSent(
   const isAutomaticInvoiceHandoff =
     invoiceJob.job_type === 'invoice_delivery' &&
     input.cycleId === automaticPaymentCycleId(Number(invoiceJob.id)) &&
-    String(jobMetadata.actual_recipient ?? '').replace(/\D/g, '') === preview.recipient;
+    String(jobMetadata.actual_recipient ?? '').replace(/\D/g, '') === input.recipient;
+  const isSimulatedInvoiceHandoff =
+    invoiceJob.job_type === 'invoice_delivery' &&
+    jobMetadata.payment_simulation_test === true &&
+    jobMetadata.payment_test_cycle_id === input.cycleId &&
+    String(jobMetadata.actual_recipient ?? '').replace(/\D/g, '') === input.recipient;
   if (
     invoiceJob.status !== 'completed' ||
-    (!isManualTestHandoff && !isAutomaticInvoiceHandoff)
+    (!isManualTestHandoff && !isAutomaticInvoiceHandoff && !isSimulatedInvoiceHandoff)
   ) {
     throw new Error('Payment follow-up activation refused an invalid invoice handoff');
   }
@@ -218,7 +243,7 @@ export async function activatePaymentTestAfterInvoiceSent(
   const { data: receivable, error: receivableError } = await client
     .from('invoice_receivables')
     .select('raw_data')
-    .eq('invoice_id', invoice.invoiceId)
+    .eq('invoice_id', input.invoiceId)
     .single();
   if (receivableError || !receivable) {
     throw new Error(receivableError?.message ?? 'Controlled receivable was not found');
@@ -231,7 +256,7 @@ export async function activatePaymentTestAfterInvoiceSent(
   const { data: paymentCase, error: caseError } = await client
     .from('payment_follow_up_cases')
     .select('id,status,next_action_at')
-    .eq('invoice_id', invoice.invoiceId)
+    .eq('invoice_id', input.invoiceId)
     .single();
   if (caseError || !paymentCase) {
     throw new Error(caseError?.message ?? 'Controlled payment case was not found');
@@ -539,18 +564,44 @@ export async function preparePaymentTestSchedule(): Promise<void> {
 export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleResult> {
   assertLocalPaymentSchedulerBoundary();
   const client = getSupabaseServerClient();
-  const invoice = await findConfiguredTestInvoice(client);
-  if (!invoice) return { enqueued: false, reason: 'not_due' };
   const now = new Date();
-  const { data: paymentCase, error: caseError } = await client
+  let caseQuery = client
     .from('payment_follow_up_cases')
     .select('id,invoice_id,status,next_action_at')
-    .eq('invoice_id', invoice.id)
     .eq('status', 'active')
     .lte('next_action_at', now.toISOString())
-    .maybeSingle();
+    .order('next_action_at', { ascending: true })
+    .limit(1);
+  if (env.PAYMENT_SIMULATION_AUTO_FOLLOW_UP) {
+    const { data: eligibleReceivables, error: eligibleError } = await client
+      .from('invoice_receivables')
+      .select('invoice_id')
+      .contains('raw_data', {
+        invoice_source: 'fixture',
+        approved_recipient: PAYMENT_HARD_TEST_RECIPIENT,
+      });
+    if (eligibleError) {
+      throw new Error(`Unable to identify controlled simulated receivables: ${eligibleError.message}`);
+    }
+    const eligibleInvoiceIds = (eligibleReceivables ?? []).map((row) => Number(row.invoice_id));
+    if (eligibleInvoiceIds.length === 0) return { enqueued: false, reason: 'not_due' };
+    caseQuery = caseQuery.in('invoice_id', eligibleInvoiceIds);
+  } else {
+    const configuredInvoice = await findConfiguredTestInvoice(client);
+    if (!configuredInvoice) return { enqueued: false, reason: 'not_due' };
+    caseQuery = caseQuery.eq('invoice_id', configuredInvoice.id);
+  }
+  const { data: paymentCase, error: caseError } = await caseQuery.maybeSingle();
   if (caseError) throw new Error(`Unable to inspect the payment schedule: ${caseError.message}`);
   if (!paymentCase?.next_action_at) return { enqueued: false, reason: 'not_due' };
+  const { data: invoice, error: invoiceError } = await client
+    .from('invoices')
+    .select('id,sap_billing_document,sold_to_customer_id')
+    .eq('id', paymentCase.invoice_id)
+    .single();
+  if (invoiceError || !invoice) {
+    throw new Error(`Unable to load the due payment invoice: ${invoiceError?.message ?? 'Invoice not found'}`);
+  }
 
   const { data: receivable, error: receivableError } = await client
     .from('invoice_receivables')
@@ -566,6 +617,14 @@ export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleRe
   const cycleId = String(receivableMetadata.payment_test_cycle_id ?? '');
   if (!cycleId) {
     throw new Error('Controlled payment cycle is missing from the receivable status');
+  }
+  const approvedRecipient = String(receivableMetadata.approved_recipient ?? '').replace(/\D/g, '');
+  const isSimulatedPaymentTest = receivableMetadata.invoice_source === 'fixture';
+  if (
+    (approvedRecipient && approvedRecipient !== PAYMENT_HARD_TEST_RECIPIENT) ||
+    (!approvedRecipient && String(invoice.sap_billing_document) !== env.PAYMENT_TEST_INVOICE)
+  ) {
+    throw new Error('Controlled payment schedule refused a case outside the approved test boundary');
   }
   await client.from('audit_logs').insert({
     actor_type: 'agent',
@@ -674,7 +733,7 @@ export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleRe
         idempotency_key: idempotencyKey,
         metadata: {
           controlled_test: true,
-          invoice_source: 'sap_qas',
+          invoice_source: isSimulatedPaymentTest ? 'fixture' : 'sap_qas',
           receivable_source: 'test_fixture',
           actual_recipient: PAYMENT_HARD_TEST_RECIPIENT,
           masked_recipient: maskPhone(PAYMENT_HARD_TEST_RECIPIENT),
@@ -683,6 +742,7 @@ export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleRe
           template_name: env.MSG91_PAYMENT_TEMPLATE_NAME,
           reminder_number: reminderNumber,
           payment_test_cycle_id: cycleId,
+          payment_simulation_test: isSimulatedPaymentTest,
           status_checked_at: now.toISOString(),
           scheduled_for: scheduledFor,
         },
@@ -748,7 +808,8 @@ function assertLocalPaymentSchedulerBoundary(): void {
     env.DELIVERY_MODE !== 'test' ||
     !env.PAYMENT_FOLLOW_UP_ENABLED ||
     !env.PAYMENT_FOLLOW_UP_SEND_ENABLED ||
-    env.PAYMENT_RECEIVABLE_SOURCE !== 'test_fixture'
+    env.PAYMENT_RECEIVABLE_SOURCE !== 'test_fixture' ||
+    (!env.PAYMENT_SIMULATION_AUTO_FOLLOW_UP && !isPaymentFollowUpTestConfigured)
   ) {
     throw new Error('Scheduled payment reminders are disabled outside the single-recipient controlled test');
   }

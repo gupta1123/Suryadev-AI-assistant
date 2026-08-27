@@ -40,6 +40,7 @@ const envSchema = z.object({
   PAYMENT_FOLLOW_UP_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   PAYMENT_FOLLOW_UP_SEND_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   PAYMENT_TEST_DEPLOYMENT_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+  PAYMENT_SIMULATION_AUTO_FOLLOW_UP: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   PAYMENT_RECEIVABLE_SOURCE: z.enum(['test_fixture', 'sap']).default('test_fixture'),
   PAYMENT_TEST_RECIPIENT: z.string().default(''),
   PAYMENT_TEST_CUSTOMER: z.string().default(''),
@@ -119,4 +120,13 @@ export const isPaymentFollowUpTestConfigured = Boolean(
     env.PAYMENT_TEST_INVOICE &&
     env.PAYMENT_TEST_DUE_DATE &&
     paymentTestRecipient,
+);
+
+export const isPaymentFollowUpSchedulerConfigured = Boolean(
+  isPaymentFollowUpRuntimeAllowed &&
+    env.DELIVERY_MODE === 'test' &&
+    env.PAYMENT_FOLLOW_UP_ENABLED &&
+    env.PAYMENT_RECEIVABLE_SOURCE === 'test_fixture' &&
+    paymentTestRecipient &&
+    (env.PAYMENT_SIMULATION_AUTO_FOLLOW_UP || isPaymentFollowUpTestConfigured),
 );

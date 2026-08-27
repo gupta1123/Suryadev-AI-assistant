@@ -10,15 +10,16 @@ let lastSimulationNumber = 0n;
 export class InvoiceSimulator {
   constructor(private readonly fixtures = new FixtureInvoiceSource()) {}
 
-  async create(now = new Date()): Promise<InvoiceCandidate> {
+  async create(now = new Date(), recipient?: string): Promise<InvoiceCandidate> {
     const base = await this.fixtures.getRaw(BASE_FIXTURE_ID);
-    return normalizeFixture(createSimulatedSapFixture(base, now));
+    return normalizeFixture(createSimulatedSapFixture(base, now, recipient));
   }
 }
 
 export function createSimulatedSapFixture(
   baseFixture: SapInvoiceFixture,
   now = new Date(),
+  recipient?: string,
 ): SapInvoiceFixture {
   const fixture = structuredClone(baseFixture);
   const billingDocument = nextBillingDocument(now);
@@ -26,6 +27,7 @@ export function createSimulatedSapFixture(
   const midnightUtc = Date.parse(`${invoiceDate}T00:00:00Z`);
   const billing = fixture.responses.billingDocument.d.results[0];
   const partner = fixture.responses.businessPartner.d.results[0];
+  const phone = fixture.responses.phoneNumbers.d.results[0];
   if (!billing || !partner) throw new Error('Simulation base fixture is incomplete');
 
   fixture.fixtureId = `simulated-invoice-${billingDocument}`;
@@ -34,6 +36,11 @@ export function createSimulatedSapFixture(
   billing.BillingDocumentDate = `/Date(${midnightUtc})/`;
   billing.CreationDateTime = now.toISOString();
   billing.LastChangeDateTime = now.toISOString();
+
+  if (recipient && phone) {
+    phone.PhoneNumber = `+${recipient.replace(/\D/g, '')}`;
+    phone.IsDefaultPhoneNumber = true;
+  }
 
   for (const item of fixture.responses.billingDocumentItems.d.results) {
     item.BillingDocument = billingDocument;
