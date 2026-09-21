@@ -5,6 +5,7 @@ import { HttpError } from '../../lib/http.js';
 import { getSupabaseServerClient } from '../../lib/supabase.js';
 import type { InvoiceCandidate, PersistedDelivery } from './domain.js';
 import { createDeliveryIdempotencyKey, maskPhone } from './policy.js';
+import { getBillingDocumentDefinition } from './document-policy.js';
 
 export type PersistedInvoice = {
   customerId: number;
@@ -39,6 +40,7 @@ export type DeliveryJobContext = ClaimedJob & {
     billing_document_date: string;
     transaction_currency: string;
     total_gross_amount: number;
+    billing_document_type: string;
   };
   document: {
     id: number;
@@ -78,7 +80,11 @@ export async function persistInvoiceAndEnqueue(
 
   try {
     const persisted = await persistInvoiceRecord(client, candidate, options.source);
-    const templateId = await findTemplateId(client);
+    const documentDefinition = getBillingDocumentDefinition(candidate.billingDocumentType);
+    if (!documentDefinition) {
+      throw new Error(`Unsupported billing document type ${candidate.billingDocumentType}`);
+    }
+    const templateId = await findTemplateId(client, documentDefinition.templateName);
     const idempotencyKey =
       options.idempotencyKey ?? createDeliveryIdempotencyKey(candidate, recipient);
 
@@ -104,6 +110,9 @@ export async function persistInvoiceAndEnqueue(
           masked_recipient: maskPhone(recipient),
           document_id: persisted.documentId,
           document_path: persisted.documentPath,
+          billing_document_type: documentDefinition.type,
+          billing_document_kind: documentDefinition.kind,
+          template_name: documentDefinition.templateName,
           ...options.metadata,
         },
       })
@@ -182,7 +191,7 @@ export async function listDeliveryJobsPage(
   let query = client
     .from('communication_jobs')
     .select(
-      'id,job_type,status,attempt_count,max_attempts,scheduled_at,completed_at,last_error,metadata,customers(display_name),invoices!communication_jobs_primary_invoice_id_fkey(sap_billing_document,billing_document_date,transaction_currency,total_gross_amount),messages(id,status,provider_message_id,sent_at,delivered_at,read_at,failed_at)',
+      'id,job_type,status,attempt_count,max_attempts,scheduled_at,completed_at,last_error,metadata,customers(display_name),invoices!communication_jobs_primary_invoice_id_fkey(sap_billing_document,billing_document_type,billing_document_date,transaction_currency,total_gross_amount),messages(id,status,provider_message_id,sent_at,delivered_at,read_at,failed_at)',
     )
     .in('job_type', ['invoice_delivery', 'manual_resend'])
     .order('id', { ascending: false })
@@ -344,7 +353,7 @@ export async function getDeliveryJobContext(job: ClaimedJob): Promise<DeliveryJo
     requiredSingle(
       client
         .from('invoices')
-        .select('id,sap_billing_document,billing_document_date,transaction_currency,total_gross_amount')
+        .select('id,sap_billing_document,billing_document_type,billing_document_date,transaction_currency,total_gross_amount')
         .eq('id', job.primary_invoice_id)
         .single(),
       'Delivery invoice not found',
@@ -405,6 +414,9 @@ export async function getOrCreateMessage(
   status: string;
 }> {
   const client = getSupabaseServerClient();
+  const documentDefinition = getBillingDocumentDefinition(
+    context.invoice.billing_document_type,
+  );
   const { data: existing } = await client
     .from('messages')
     .select('id,status')
@@ -424,7 +436,9 @@ export async function getOrCreateMessage(
         direction: 'outbound',
         channel: 'whatsapp',
         purpose: options.purpose ?? 'invoice_delivery',
-        body: options.body ?? `Invoice ${context.invoice.sap_billing_document}`,
+        body:
+          options.body ??
+          `${documentDefinition?.label ?? 'Billing document'} ${context.invoice.sap_billing_document}`,
         status: 'created',
         metadata: {
           source: String(context.metadata.source ?? 'unknown'),
@@ -608,6 +622,26 @@ export async function markClaimedJobFailed(jobId: number, errorMessage: string):
         locked_at: null,
         locked_by: null,
         last_error: errorMessage,
+      })
+      .eq('id', jobId)
+      .eq('status', 'processing'),
+  );
+}
+
+export async function deferClaimedJob(
+  jobId: number,
+  reason: string,
+  delayMs = 15 * 60 * 1000,
+): Promise<void> {
+  await ensureUpdate(
+    getSupabaseServerClient()
+      .from('communication_jobs')
+      .update({
+        status: 'queued',
+        available_at: new Date(Date.now() + delayMs).toISOString(),
+        locked_at: null,
+        locked_by: null,
+        last_error: reason,
       })
       .eq('id', jobId)
       .eq('status', 'processing'),
@@ -954,8 +988,14 @@ async function upsertInvoice(
     overall_billing_status: candidate.overallBillingStatus,
     is_cancelled: candidate.isCancelled,
     source_version: 1,
-    eligibility_status: candidate.isCancelled ? 'cancelled' : 'eligible',
-    eligibility_reason: candidate.isCancelled ? 'Invoice is cancelled' : null,
+    eligibility_status:
+      candidate.isCancelled && candidate.billingDocumentType.toUpperCase() !== 'S1'
+        ? 'cancelled'
+        : 'eligible',
+    eligibility_reason:
+      candidate.isCancelled && candidate.billingDocumentType.toUpperCase() !== 'S1'
+        ? 'Billing document is a cancelled original'
+        : null,
     last_synced_at: new Date().toISOString(),
     raw_data: candidate.rawData,
   };
@@ -1093,13 +1133,15 @@ async function finishAgentRun(
     .eq('id', id);
 }
 
-async function findTemplateId(client: SupabaseClient): Promise<number | null> {
+async function findTemplateId(
+  client: SupabaseClient,
+  templateName: string,
+): Promise<number | null> {
   const { data, error } = await client
     .from('communication_templates')
     .select('id')
-    .eq('provider_template_id', env.MSG91_TEMPLATE_NAME)
+    .eq('provider_template_id', templateName)
     .eq('channel', 'whatsapp')
-    .eq('status', 'approved')
     .order('version', { ascending: false })
     .limit(1)
     .maybeSingle();

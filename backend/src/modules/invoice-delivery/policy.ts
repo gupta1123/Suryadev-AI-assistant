@@ -11,14 +11,25 @@ import type {
   InvoicePreview,
   ValidationResult,
 } from './domain.js';
+import {
+  getBillingDocumentDefinition,
+  isTmtDocument,
+} from './document-policy.js';
 
 export function buildInvoicePreview(
   candidate: InvoiceCandidate,
   requestedRecipient: string,
 ): InvoicePreview {
   const recipient = digitsOnly(requestedRecipient);
+  const documentDefinition = getBillingDocumentDefinition(candidate.billingDocumentType);
   const validations: ValidationResult[] = [
-    validation('invoice_active', 'Invoice is not cancelled', !candidate.isCancelled),
+    validation('document_type_supported', 'Billing document type is supported', Boolean(documentDefinition)),
+    validation('tmt_product', 'Billing document contains a configured TMT material', isTmtDocument(candidate)),
+    validation(
+      'document_active',
+      'Billing document is not a cancelled original',
+      candidate.billingDocumentType.toUpperCase() === 'S1' || !candidate.isCancelled,
+    ),
     validation('customer_present', 'Customer information is available', Boolean(candidate.customer.displayName)),
     validation('pdf_present', 'Invoice PDF is available', candidate.pdf.base64.length > 0),
     validation('currency_supported', 'Template currency is INR', candidate.currency === 'INR'),
@@ -41,6 +52,7 @@ export function buildInvoicePreview(
     fixtureLabel: candidate.fixtureLabel,
     invoice: {
       billingDocument: candidate.billingDocument,
+      billingDocumentType: candidate.billingDocumentType,
       billingDocumentDate: candidate.billingDocumentDate,
       customerName: candidate.customer.displayName,
       customerNumber: candidate.customer.customerNumber,
@@ -53,7 +65,7 @@ export function buildInvoicePreview(
     actualRecipient: recipient,
     maskedRecipient: maskPhone(recipient),
     template: {
-      name: env.MSG91_TEMPLATE_NAME,
+      name: documentDefinition?.templateName ?? env.MSG91_TEMPLATE_NAME,
       language: env.MSG91_TEMPLATE_LANGUAGE,
       variables: {
         var_1: candidate.customer.displayName,
@@ -73,6 +85,10 @@ export function createDeliveryIdempotencyKey(
   recipient: string,
 ): string {
   const recipientHash = createHash('sha256').update(recipient).digest('hex').slice(0, 16);
+  const type = candidate.billingDocumentType.trim().toUpperCase();
+  if (type !== 'F2') {
+    return `billing_document_delivery:${type}:${candidate.billingDocument}:v1:whatsapp:${recipientHash}`;
+  }
   return `invoice_delivery:${candidate.billingDocument}:v1:whatsapp:${recipientHash}`;
 }
 

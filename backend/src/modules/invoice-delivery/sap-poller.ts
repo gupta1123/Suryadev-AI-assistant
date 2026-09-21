@@ -12,6 +12,12 @@ import {
 } from './repository.js';
 import { SapInvoiceSource } from './sap-source.js';
 import { processDeliveryQueue } from './worker.js';
+import { isWhatsappTemplateApproved } from './msg91-client.js';
+import {
+  getBillingDocumentDefinition,
+  isTmtDocument,
+  SUPPORTED_BILLING_DOCUMENT_TYPES,
+} from './document-policy.js';
 
 export type SapPollResult = {
   status: 'completed' | 'skipped';
@@ -73,10 +79,32 @@ export async function pollSapInvoices(): Promise<SapPollResult> {
     const source = new SapInvoiceSource();
     const invoices = await source.list();
     result.examined = invoices.length;
+    const templateApprovals = new Map(
+      await Promise.all(
+        SUPPORTED_BILLING_DOCUMENT_TYPES.map(async (type) => {
+          const definition = getBillingDocumentDefinition(type)!;
+          return [
+            type,
+            await isWhatsappTemplateApproved(
+              definition.templateName,
+              env.MSG91_TEMPLATE_LANGUAGE,
+            ),
+          ] as const;
+        }),
+      ),
+    );
 
     for (const invoice of invoices) {
       result.lastBillingDocument = invoice.billingDocument;
       try {
+        const definition = getBillingDocumentDefinition(invoice.billingDocumentType);
+        if (!definition || !templateApprovals.get(definition.type)) {
+          result.skipped += 1;
+          errors.push(
+            `${invoice.billingDocument}: WhatsApp template ${definition?.templateName ?? 'unknown'} is not approved`,
+          );
+          continue;
+        }
         const candidate = await source.get(invoice.id);
         const reason = automaticDeliveryBlocker(candidate);
         if (reason) {
@@ -127,17 +155,22 @@ export async function pollSapInvoices(): Promise<SapPollResult> {
   }
 }
 
-function automaticDeliveryBlocker(
+export function automaticDeliveryBlocker(
   candidate: Awaited<ReturnType<SapInvoiceSource['get']>>,
 ): string | null {
+  const definition = getBillingDocumentDefinition(candidate.billingDocumentType);
+  if (!definition) return 'billing document type is not supported';
   if (!sapAllowedCustomers.has(candidate.customer.customerNumber)) {
     return 'customer is outside the SAP allowlist';
   }
   if ((candidate.creationDateTime ?? `${candidate.billingDocumentDate}T00:00:00.000Z`).slice(0, 10) < env.SAP_POLL_START_DATE) {
     return 'invoice was created before the polling start date';
   }
-  if (candidate.isCancelled) return 'invoice is cancelled';
-  if (!candidate.pdf.base64) return 'invoice PDF is not available';
+  if (candidate.isCancelled && definition.type !== 'S1') {
+    return 'billing document is a cancelled original; waiting for its S1 cancellation document';
+  }
+  if (!isTmtDocument(candidate)) return 'billing document does not contain a configured TMT material';
+  if (!candidate.pdf.base64) return 'billing document PDF is not available';
   if (!/^[1-9]\d{7,14}$/.test(candidate.contact.normalizedValue)) {
     return 'customer WhatsApp number is invalid';
   }

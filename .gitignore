@@ -13,6 +13,8 @@ dist/
 coverage/
 *.tsbuildinfo
 .artifacts/
+/output/
+/tmp/
 
 # Supabase local state
 supabase/.branches/

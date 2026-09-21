@@ -23,6 +23,7 @@ export class FixtureInvoiceSource implements InvoiceSource {
             id: candidate.fixtureId,
             label: candidate.fixtureLabel,
             billingDocument: candidate.billingDocument,
+            billingDocumentType: candidate.billingDocumentType,
             customerName: candidate.customer.displayName,
             amount: candidate.totalGrossAmount,
             currency: candidate.currency,

@@ -3,6 +3,10 @@ import { FixtureInvoiceSource, normalizeFixture } from './fixture-source.js';
 import type { SapInvoiceFixture } from './fixture-schema.js';
 import { sapInvoiceFixtureSchema } from './fixture-schema.js';
 import { generateDummyInvoicePdf } from './pdf-generator.js';
+import {
+  getBillingDocumentDefinition,
+  type SupportedBillingDocumentType,
+} from './document-policy.js';
 
 const BASE_FIXTURE_ID = 'sap-invoice-0090000001';
 let lastSimulationNumber = 0n;
@@ -10,9 +14,13 @@ let lastSimulationNumber = 0n;
 export class InvoiceSimulator {
   constructor(private readonly fixtures = new FixtureInvoiceSource()) {}
 
-  async create(now = new Date(), recipient?: string): Promise<InvoiceCandidate> {
+  async create(
+    now = new Date(),
+    recipient?: string,
+    documentType: SupportedBillingDocumentType = 'F2',
+  ): Promise<InvoiceCandidate> {
     const base = await this.fixtures.getRaw(BASE_FIXTURE_ID);
-    return normalizeFixture(createSimulatedSapFixture(base, now, recipient));
+    return normalizeFixture(createSimulatedSapFixture(base, now, recipient, documentType));
   }
 }
 
@@ -20,8 +28,11 @@ export function createSimulatedSapFixture(
   baseFixture: SapInvoiceFixture,
   now = new Date(),
   recipient?: string,
+  documentType: SupportedBillingDocumentType = 'F2',
 ): SapInvoiceFixture {
   const fixture = structuredClone(baseFixture);
+  const documentDefinition = getBillingDocumentDefinition(documentType);
+  if (!documentDefinition) throw new Error(`Unsupported simulation document type ${documentType}`);
   const billingDocument = nextBillingDocument(now);
   const invoiceDate = dateInIndia(now);
   const midnightUtc = Date.parse(`${invoiceDate}T00:00:00Z`);
@@ -30,9 +41,10 @@ export function createSimulatedSapFixture(
   const phone = fixture.responses.phoneNumbers.d.results[0];
   if (!billing || !partner) throw new Error('Simulation base fixture is incomplete');
 
-  fixture.fixtureId = `simulated-invoice-${billingDocument}`;
-  fixture.label = `Simulated SAP invoice ${billingDocument}`;
+  fixture.fixtureId = `simulated-${documentDefinition.kind}-${billingDocument}`;
+  fixture.label = `Simulated SAP ${documentDefinition.label.toLowerCase()} ${billingDocument}`;
   billing.BillingDocument = billingDocument;
+  billing.BillingDocumentType = documentDefinition.type;
   billing.BillingDocumentDate = `/Date(${midnightUtc})/`;
   billing.CreationDateTime = now.toISOString();
   billing.LastChangeDateTime = now.toISOString();
@@ -51,8 +63,9 @@ export function createSimulatedSapFixture(
 
   const pdf = fixture.responses.getPdf.d;
   pdf.BillingDocument = billingDocument;
-  pdf.FileName = `TEST-Invoice-${billingDocument}.pdf`;
+  pdf.FileName = `TEST-${documentDefinition.fileNamePrefix}-${billingDocument}.pdf`;
   pdf.BillingDocumentBinary = generateDummyInvoicePdf({
+    documentLabel: documentDefinition.label,
     invoiceNumber: billingDocument,
     invoiceDate,
     customerName:

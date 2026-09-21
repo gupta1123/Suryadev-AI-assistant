@@ -7,6 +7,7 @@ export type InvoiceSourceSummary = {
   id: string;
   label: string;
   billingDocument: string;
+  billingDocumentType: string;
   customerName: string;
   amount: number;
   currency: string;

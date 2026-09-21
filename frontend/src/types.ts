@@ -15,6 +15,12 @@ export type DeliveryConfig = {
   msg91StatusPollingEnabled: boolean;
   templateName: string;
   templateLanguage: string;
+  billingDocumentTypes: Array<{
+    type: 'F2' | 'S1' | 'CBRE' | 'G2' | 'L2';
+    kind: 'invoice' | 'cancelled_invoice' | 'return_credit_memo' | 'credit_memo' | 'debit_memo';
+    label: string;
+    templateName: string;
+  }>;
   testRecipients: string[];
   defaultTestRecipient: string;
   simulationReady: boolean;
@@ -25,6 +31,24 @@ export type DeliveryConfig = {
   sapPollIntervalMs: number;
   sapPollStartDate: string;
   sapAllowedCustomers: string[];
+  tmtMaterialIds: string[];
+  tmtMaterialPrefixes: string[];
+  tmtMaterialGroups: string[];
+};
+
+export type BillingDocumentTemplateStatus = {
+  type: 'F2' | 'S1' | 'CBRE' | 'G2' | 'L2';
+  kind: 'invoice' | 'cancelled_invoice' | 'return_credit_memo' | 'credit_memo' | 'debit_memo';
+  label: string;
+  templateName: string;
+  language: string;
+  approved: boolean;
+};
+
+export type BillingDocumentTemplateReadiness = {
+  templates: BillingDocumentTemplateStatus[];
+  allApproved: boolean;
+  checkedAt: string;
 };
 
 export type SapPollingStatus = {
@@ -43,6 +67,7 @@ export type Fixture = {
   id: string;
   label: string;
   billingDocument: string;
+  billingDocumentType: string;
   customerName: string;
   amount: number;
   currency: string;
@@ -64,6 +89,7 @@ export type InvoicePreview = {
   sendAllowed: boolean;
   invoice: {
     billingDocument: string;
+    billingDocumentType: string;
     billingDocumentDate: string;
     customerName: string;
     customerNumber: string;
@@ -174,7 +200,14 @@ export type DeliveryJob = {
   updated_at?: string;
   last_error?: string | null;
   idempotency_key?: string;
-  metadata?: { masked_recipient?: string; source?: string; fixture_id?: string };
+  metadata?: {
+    masked_recipient?: string;
+    source?: string;
+    fixture_id?: string;
+    billing_document_type?: string;
+    billing_document_kind?: string;
+    template_name?: string;
+  };
   customers?: CustomerSummary | CustomerSummary[];
   invoices?: InvoiceSummary | InvoiceSummary[];
   messages?: DeliveryMessage | DeliveryMessage[];
@@ -256,6 +289,7 @@ export type SimulationResult = {
   duplicate: boolean;
   status: string;
   billingDocument: string;
+  billingDocumentType: 'F2' | 'S1' | 'CBRE' | 'G2' | 'L2';
   customerName: string;
   amount: number;
   currency: string;

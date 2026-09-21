@@ -74,7 +74,7 @@ export function DeliveriesPage({
     <AppShell
       route={route}
       config={config}
-      eyebrow="Invoice delivery agent"
+      eyebrow="Billing document delivery agent"
       title="Deliveries"
       onNavigate={onNavigate}
       onNewDelivery={config?.invoiceSource === 'sap' ? undefined : () => setModalOpen(true)}
@@ -92,8 +92,8 @@ export function DeliveriesPage({
         <div className="section-heading">
           <div>
             <p className="eyebrow">Communication history</p>
-            <h2>All invoice deliveries</h2>
-            <p className="section-description">One record per invoice destination. Open any row for its complete audit trail.</p>
+            <h2>All billing document deliveries</h2>
+            <p className="section-description">Invoices, cancellations, credit memos and debit memos with their complete audit trail.</p>
           </div>
           <button className="button button--secondary" type="button" disabled={refreshing} onClick={() => void load(true)}>
             <RefreshCw size={15} className={refreshing ? 'spin' : ''} aria-hidden="true" /> Refresh

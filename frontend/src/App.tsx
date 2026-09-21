@@ -267,19 +267,19 @@ function LoginScreen({
 
   return (
     <main className="login-shell">
-      <section className="login-brand-panel" aria-label="SuryaDev Invoice Delivery">
+      <section className="login-brand-panel" aria-label="SuryaDev Billing Document Delivery">
         <div className="login-brand">
           <img src={logoImg} alt="SuryaDev Logo" className="login-brand-logo-img" />
-          <span><strong>SuryaDev</strong><small>Invoice Delivery Agent</small></span>
+          <span><strong>SuryaDev</strong><small>Billing Document Agent</small></span>
         </div>
 
         <div className="login-brand-content">
           <p className="login-eyebrow">Operations workspace</p>
-          <h1>Invoices delivered.<br />Every send visible.</h1>
-          <p>One secure place to test invoice delivery, review the exact customer message and follow its complete delivery history.</p>
+          <h1>Documents delivered.<br />Every send visible.</h1>
+          <p>One secure place to monitor invoices, cancellations, credit memos and debit memos sent from SAP to WhatsApp.</p>
           <div className="login-benefits">
             <span><CheckCircle2 size={17} aria-hidden="true" /> Controlled test deliveries</span>
-            <span><FileText size={17} aria-hidden="true" /> Invoice and PDF audit trail</span>
+            <span><FileText size={17} aria-hidden="true" /> Billing document and PDF audit trail</span>
             <span><MessageCircleMore size={17} aria-hidden="true" /> WhatsApp provider visibility</span>
           </div>
         </div>
@@ -292,7 +292,7 @@ function LoginScreen({
           <span className="auth-icon"><LockKeyhole size={23} aria-hidden="true" /></span>
           <p className="eyebrow">Secure admin access</p>
           <h2>Welcome back</h2>
-          <p className="login-card-description">Sign in to manage test invoice deliveries and communication history.</p>
+          <p className="login-card-description">Sign in to manage billing document deliveries and communication history.</p>
 
           {error && (
             <div className="auth-error" role="alert">
@@ -348,7 +348,7 @@ function LoginScreen({
             <span>Your session is protected by a secure, HTTP-only cookie and expires automatically.</span>
           </div>
         </div>
-        <p className="login-product-note">SuryaDev AI Agents · Invoice Delivery</p>
+        <p className="login-product-note">SuryaDev AI Agents · Billing Documents</p>
       </section>
     </main>
   );

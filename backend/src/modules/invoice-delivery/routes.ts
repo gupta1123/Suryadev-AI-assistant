@@ -9,6 +9,9 @@ import {
   isSapPollingConfigured,
   isSupabaseServiceConfigured,
   sapAllowedCustomers,
+  sapTmtMaterialGroups,
+  sapTmtMaterialIds,
+  sapTmtMaterialPrefixes,
   whatsappTestRecipients,
 } from '../../config/env.js';
 import { asyncHandler, HttpError } from '../../lib/http.js';
@@ -19,6 +22,10 @@ import {
 import { getInvoiceSource } from './invoice-source.js';
 import { buildInvoicePreview, maskPhone } from './policy.js';
 import {
+  getBillingDocumentDefinition,
+  SUPPORTED_BILLING_DOCUMENT_TYPES,
+} from './document-policy.js';
+import {
   getDeliveryJob,
   getSapPollingStatus,
   listDeliveryJobs,
@@ -27,7 +34,10 @@ import {
   retryDeliveryJob,
 } from './repository.js';
 import { InvoiceSimulator } from './simulator.js';
-import { isPaymentReminderTemplateApproved } from './msg91-client.js';
+import {
+  isPaymentReminderTemplateApproved,
+  isWhatsappTemplateApproved,
+} from './msg91-client.js';
 import { buildSimulatedPaymentPreview } from '../payment-follow-up/policy.js';
 import { preparePaymentEndToEndTest } from '../payment-follow-up/repository.js';
 import { pollSapInvoices } from './sap-poller.js';
@@ -41,6 +51,10 @@ import {
 const previewSchema = z.object({
   fixtureId: z.string().min(1),
   recipient: z.string().default(''),
+});
+
+const simulationSchema = z.object({
+  documentType: z.enum(SUPPORTED_BILLING_DOCUMENT_TYPES).default('F2'),
 });
 
 const listSchema = z.object({
@@ -83,6 +97,15 @@ invoiceDeliveryRouter.get('/config', (_request, response) => {
       msg91StatusPollingEnabled: env.MSG91_STATUS_POLL_ENABLED,
       templateName: env.MSG91_TEMPLATE_NAME,
       templateLanguage: env.MSG91_TEMPLATE_LANGUAGE,
+      billingDocumentTypes: SUPPORTED_BILLING_DOCUMENT_TYPES.map((type) => {
+        const definition = getBillingDocumentDefinition(type)!;
+        return {
+          type,
+          kind: definition.kind,
+          label: definition.label,
+          templateName: definition.templateName,
+        };
+      }),
       testRecipients: [...whatsappTestRecipients].map(maskPhone),
       defaultTestRecipient: maskPhone(defaultWhatsappTestRecipient),
       simulationReady: simulationBlockers.length === 0,
@@ -93,9 +116,42 @@ invoiceDeliveryRouter.get('/config', (_request, response) => {
       sapPollIntervalMs: env.SAP_POLL_INTERVAL_MS,
       sapPollStartDate: env.SAP_POLL_START_DATE,
       sapAllowedCustomers: [...sapAllowedCustomers],
+      tmtMaterialIds: [...sapTmtMaterialIds],
+      tmtMaterialPrefixes: [...sapTmtMaterialPrefixes],
+      tmtMaterialGroups: [...sapTmtMaterialGroups],
     },
   });
 });
+
+invoiceDeliveryRouter.get(
+  '/template-status',
+  asyncHandler(async (_request, response) => {
+    const templates = await Promise.all(
+      SUPPORTED_BILLING_DOCUMENT_TYPES.map(async (type) => {
+        const definition = getBillingDocumentDefinition(type)!;
+        const approved = await isWhatsappTemplateApproved(
+          definition.templateName,
+          env.MSG91_TEMPLATE_LANGUAGE,
+        );
+        return {
+          type,
+          kind: definition.kind,
+          label: definition.label,
+          templateName: definition.templateName,
+          language: env.MSG91_TEMPLATE_LANGUAGE,
+          approved,
+        };
+      }),
+    );
+    response.json({
+      data: {
+        templates,
+        allApproved: templates.every((template) => template.approved),
+        checkedAt: new Date().toISOString(),
+      },
+    });
+  }),
+);
 
 invoiceDeliveryRouter.get(
   '/polling-status',
@@ -117,26 +173,34 @@ invoiceDeliveryRouter.post(
 invoiceDeliveryRouter.post(
   '/simulate',
   asyncHandler(async (request: AuthenticatedRequest, response) => {
+    const input = simulationSchema.parse(request.body ?? {});
     const configurationBlockers = getSimulationBlockers();
     if (configurationBlockers.length > 0) {
       throw new HttpError(
         409,
-        'Sample invoice simulation is not ready',
+        'Sample billing document simulation is not ready',
         configurationBlockers.map((label) => ({ label })),
       );
     }
 
-    const candidate = await simulator.create(new Date(), defaultWhatsappTestRecipient);
-    const preview = buildInvoicePreview(candidate, defaultWhatsappTestRecipient);
+    const candidate = await simulator.create(
+      new Date(),
+      defaultWhatsappTestRecipient,
+      input.documentType,
+    );
+    const preview = await buildApprovedInvoicePreview(
+      candidate,
+      defaultWhatsappTestRecipient,
+    );
     if (!preview.sendAllowed) {
       throw new HttpError(
         409,
-        'Sample invoice simulation preflight failed',
+        'Sample billing document simulation preflight failed',
         preview.validations.filter((item) => item.blocking && !item.passed),
       );
     }
 
-    const paymentCycleId = env.PAYMENT_SIMULATION_AUTO_FOLLOW_UP
+    const paymentCycleId = env.PAYMENT_SIMULATION_AUTO_FOLLOW_UP && input.documentType === 'F2'
       ? `simulated-invoice-${candidate.billingDocument}-${randomUUID()}`
       : '';
     if (paymentCycleId) {
@@ -183,6 +247,7 @@ invoiceDeliveryRouter.post(
       data: {
         ...job,
         billingDocument: candidate.billingDocument,
+        billingDocumentType: input.documentType,
         customerName: candidate.customer.displayName,
         amount: candidate.totalGrossAmount,
         currency: candidate.currency,
@@ -209,7 +274,7 @@ invoiceDeliveryRouter.post(
   asyncHandler(async (request, response) => {
     const input = previewSchema.parse(request.body);
     const candidate = await source.get(input.fixtureId);
-    response.json({ data: buildInvoicePreview(candidate, input.recipient) });
+    response.json({ data: await buildApprovedInvoicePreview(candidate, input.recipient) });
   }),
 );
 
@@ -236,12 +301,43 @@ function getSimulationBlockers(): string[] {
   return blockers;
 }
 
+async function buildApprovedInvoicePreview(
+  candidate: Awaited<ReturnType<typeof source.get>>,
+  recipient: string,
+) {
+  const preview = buildInvoicePreview(candidate, recipient);
+  const definition = getBillingDocumentDefinition(candidate.billingDocumentType);
+  const approved = Boolean(
+    definition &&
+      await isWhatsappTemplateApproved(
+        definition.templateName,
+        env.MSG91_TEMPLATE_LANGUAGE,
+      ),
+  );
+  const validations = [
+    ...preview.validations,
+    {
+      code: 'template_approved',
+      label: definition
+        ? `WhatsApp template ${definition.templateName} is approved`
+        : 'WhatsApp template is approved',
+      passed: approved,
+      blocking: true,
+    },
+  ];
+  return {
+    ...preview,
+    validations,
+    sendAllowed: validations.every((item) => !item.blocking || item.passed),
+  };
+}
+
 invoiceDeliveryRouter.post(
   '/send',
   asyncHandler(async (request: AuthenticatedRequest, response) => {
     const input = previewSchema.parse(request.body);
     const candidate = await source.get(input.fixtureId);
-    const preview = buildInvoicePreview(candidate, input.recipient);
+    const preview = await buildApprovedInvoicePreview(candidate, input.recipient);
     if (!preview.sendAllowed) {
       throw new HttpError(
         409,

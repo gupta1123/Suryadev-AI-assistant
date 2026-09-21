@@ -27,11 +27,23 @@ export type Msg91PaymentReminderInput = {
 export async function isPaymentReminderTemplateApproved(
   timeoutMs = 20_000,
 ): Promise<boolean> {
+  return isWhatsappTemplateApproved(
+    env.MSG91_PAYMENT_TEMPLATE_NAME,
+    env.MSG91_PAYMENT_TEMPLATE_LANGUAGE,
+    timeoutMs,
+  );
+}
+
+export async function isWhatsappTemplateApproved(
+  templateName: string,
+  templateLanguage: string,
+  timeoutMs = 20_000,
+): Promise<boolean> {
   if (!env.MSG91_AUTHKEY || !digitsOnly(env.MSG91_INTEGRATED_NUMBER)) return false;
   const url = new URL(`${MSG91_GET_TEMPLATE_URL}${digitsOnly(env.MSG91_INTEGRATED_NUMBER)}`);
-  url.searchParams.set('template_name', env.MSG91_PAYMENT_TEMPLATE_NAME);
+  url.searchParams.set('template_name', templateName);
   url.searchParams.set('template_status', 'approved');
-  url.searchParams.set('template_language', env.MSG91_PAYMENT_TEMPLATE_LANGUAGE);
+  url.searchParams.set('template_language', templateLanguage);
   url.searchParams.set('pagination', 'true');
   url.searchParams.set('page_size', '10');
   url.searchParams.set('page_num', '1');
@@ -48,25 +60,32 @@ export async function isPaymentReminderTemplateApproved(
     });
     if (!response.ok) return false;
     const body = await response.json().catch(() => ({}));
-    return findApprovedTemplate(body);
+    return findApprovedTemplate(body, templateName, templateLanguage);
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') return false;
-    throw error;
+    return false;
   } finally {
     clearTimeout(timeout);
   }
 }
 
 export function buildMsg91InvoicePayload(input: Msg91TemplateInput): Record<string, unknown> {
+  const bodyPrefix = input.parameterFormat === 'named' ? 'body_var_' : 'body_';
+  const bodyComponents = {
+    [`${bodyPrefix}1`]: { type: 'text', value: input.customerName },
+    [`${bodyPrefix}2`]: { type: 'text', value: input.billingDocument },
+    [`${bodyPrefix}3`]: { type: 'text', value: input.billingDocumentDate },
+    [`${bodyPrefix}4`]: { type: 'text', value: input.formattedAmount },
+    [`${bodyPrefix}5`]: { type: 'text', value: input.teamName },
+  };
   return {
     integrated_number: digitsOnly(env.MSG91_INTEGRATED_NUMBER),
     content_type: 'template',
     payload: {
       type: 'template',
       template: {
-        name: env.MSG91_TEMPLATE_NAME,
+        name: input.templateName,
         language: {
-          code: env.MSG91_TEMPLATE_LANGUAGE,
+          code: input.templateLanguage,
           policy: 'deterministic',
         },
         to_and_components: [
@@ -78,11 +97,7 @@ export function buildMsg91InvoicePayload(input: Msg91TemplateInput): Record<stri
                 value: input.documentUrl,
                 filename: input.documentFileName,
               },
-              body_var_1: { type: 'text', value: input.customerName },
-              body_var_2: { type: 'text', value: input.billingDocument },
-              body_var_3: { type: 'text', value: input.billingDocumentDate },
-              body_var_4: { type: 'text', value: input.formattedAmount },
-              body_var_5: { type: 'text', value: input.teamName },
+              ...bodyComponents,
             },
           },
         ],
@@ -262,15 +277,23 @@ function findStringByKeys(value: unknown, keys: string[]): string | undefined {
   return undefined;
 }
 
-function findApprovedTemplate(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(findApprovedTemplate);
+function findApprovedTemplate(
+  value: unknown,
+  templateName: string,
+  templateLanguage: string,
+): boolean {
+  if (Array.isArray(value)) {
+    return value.some((item) => findApprovedTemplate(item, templateName, templateLanguage));
+  }
   if (!isRecord(value)) return false;
   if (
-    value.name === env.MSG91_PAYMENT_TEMPLATE_NAME &&
-    value.language === env.MSG91_PAYMENT_TEMPLATE_LANGUAGE &&
+    value.name === templateName &&
+    value.language === templateLanguage &&
     String(value.status ?? '').toLowerCase() === 'approved'
   ) return true;
-  return Object.values(value).some(findApprovedTemplate);
+  return Object.values(value).some((item) =>
+    findApprovedTemplate(item, templateName, templateLanguage),
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

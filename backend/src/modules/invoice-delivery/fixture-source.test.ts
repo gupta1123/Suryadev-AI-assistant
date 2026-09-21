@@ -22,6 +22,7 @@ describe('FixtureInvoiceSource', () => {
       id: 'sap-invoice-0090000001',
       label: 'Test invoice 0090000001 — Sunrise Engineering',
       billingDocument: '0090000001',
+      billingDocumentType: 'F2',
       customerName: 'Sunrise Engineering Pvt Ltd',
       amount: 12_992,
       currency: 'INR',

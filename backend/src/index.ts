@@ -1,5 +1,9 @@
 import { app } from './app.js';
-import { env, isSupabaseServiceConfigured } from './config/env.js';
+import {
+  env,
+  isInvoiceDeliveryRuntimeConfigured,
+  isSupabaseServiceConfigured,
+} from './config/env.js';
 import {
   startDeliveryWorker,
   stopDeliveryWorker,
@@ -26,7 +30,7 @@ const server = app.listen(env.PORT, () => {
 });
 
 if (isSupabaseServiceConfigured) {
-  startDeliveryWorker();
+  if (isInvoiceDeliveryRuntimeConfigured) startDeliveryWorker();
   startSapInvoicePoller();
   startMsg91StatusPoller();
   startPaymentFollowUpWorker();

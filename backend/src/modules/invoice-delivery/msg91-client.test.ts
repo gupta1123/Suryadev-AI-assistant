@@ -9,6 +9,9 @@ import {
 describe('MSG91 invoice template payload', () => {
   it('maps the approved document template variables exactly once', () => {
     const payload = buildMsg91InvoicePayload({
+      templateName: 'share_invoice',
+      templateLanguage: 'en',
+      parameterFormat: 'named',
       recipient: '919999999999',
       documentUrl: 'https://example.test/signed-invoice.pdf?token=secret',
       documentFileName: 'invoice.pdf',
@@ -24,6 +27,8 @@ describe('MSG91 invoice template payload', () => {
     const components = target.components as Record<string, Record<string, unknown>>;
 
     assert.deepEqual(target.to, ['919999999999']);
+    assert.equal(template.name, 'share_invoice');
+    assert.equal(Object.keys(components).some((key) => key.toLowerCase().includes('button')), false);
     assert.equal(components.header_1?.type, 'document');
     assert.equal(components.body_var_1?.value, 'Customer One');
     assert.equal(components.body_var_4?.value, '12,992.00');
@@ -32,6 +37,9 @@ describe('MSG91 invoice template payload', () => {
   it('redacts the phone and signed URL before persistence', () => {
     const sanitized = sanitizeMsg91Payload(
       buildMsg91InvoicePayload({
+        templateName: 'share_invoice',
+        templateLanguage: 'en',
+        parameterFormat: 'named',
         recipient: '919999999999',
         documentUrl: 'https://example.test/private.pdf?token=secret',
         documentFileName: 'invoice.pdf',
@@ -45,6 +53,31 @@ describe('MSG91 invoice template payload', () => {
     const serialized = JSON.stringify(sanitized);
     assert.equal(serialized.includes('919999999999'), false);
     assert.equal(serialized.includes('token=secret'), false);
+  });
+
+  it('uses positional component keys for the four new button-free templates', () => {
+    const payload = buildMsg91InvoicePayload({
+      templateName: 'share_invoice_cancellation_v2',
+      templateLanguage: 'en',
+      parameterFormat: 'positional',
+      recipient: '919999999999',
+      documentUrl: 'https://example.test/cancellation.pdf',
+      documentFileName: 'cancelled-invoice.pdf',
+      customerName: 'Customer One',
+      billingDocument: '9002',
+      billingDocumentDate: '28 Jul 2026',
+      formattedAmount: '12,992.00',
+      teamName: 'SuryaDev',
+    });
+    const template = (payload.payload as Record<string, unknown>)
+      .template as Record<string, unknown>;
+    const target = (template.to_and_components as Record<string, unknown>[])[0]!;
+    const components = target.components as Record<string, Record<string, unknown>>;
+
+    assert.equal(components.body_1?.value, 'Customer One');
+    assert.equal(components.body_5?.value, 'SuryaDev');
+    assert.equal(components.body_var_1, undefined);
+    assert.equal(Object.keys(components).some((key) => key.toLowerCase().includes('button')), false);
   });
 });
 

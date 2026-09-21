@@ -87,13 +87,14 @@ The first workflow provides:
 - private PDF storage and temporary signed download URLs;
 - idempotent delivery jobs;
 - database-backed job claiming with `FOR UPDATE SKIP LOCKED`;
-- MSG91 `share_invoice` document-template delivery;
+- existing MSG91 `share_invoice` F2 document-template delivery;
 - delivery attempts, safe manual retries, and sent/delivered/read/failed status history;
 - admin login, preflight, delivery history, and job timeline UI.
 
 Apply `supabase/migrations/20260728170000_invoice_delivery_worker.sql` after the
-core schema. It adds the atomic queue claim and records the already-approved
-MSG91 template.
+core schema. It adds the atomic queue claim and preserves the approved F2 template.
+Then apply `supabase/migrations/20260921090201_billing_document_whatsapp_templates.sql`
+to register the four additional button-free templates used by the current workflow.
 
 `supabase/migrations/20260729120000_sap_polling_and_delivery_status.sql` adds an
 atomic SAP checkpoint claim and an index for provider-status reconciliation. The
@@ -114,21 +115,36 @@ SAP_POLL_ENABLED=true
 SAP_POLL_INTERVAL_MS=15000
 SAP_POLL_START_DATE=2026-07-29
 SAP_ALLOWED_CUSTOMERS=550071
+SAP_TMT_MATERIAL_IDS=
+SAP_TMT_MATERIAL_PREFIXES=TMT,STEEL-TMT
+SAP_TMT_MATERIAL_GROUPS=
 ```
 
 During controlled testing, keep `DELIVERY_MODE=test` and put only the approved
 country-code-prefixed number in `WHATSAPP_TEST_RECIPIENTS`. A newly created SAP
-invoice is deliverable only when all of these are true:
+billing document is deliverable only when all of these are true:
 
 - its sold-to customer is explicitly allowlisted;
 - its SAP creation date is on or after the configured start date;
-- it is not cancelled;
+- its document type is F2, S1, CBRE, G2, or L2;
+- at least one item matches the configured TMT material IDs, prefixes, groups,
+  or contains the explicit `TMT` token in its SAP item description;
+- it is not a cancelled original (the separate S1 cancellation document is delivered);
 - SAP returns a valid PDF and a valid customer phone number;
 - in test mode, that phone number is also on the WhatsApp test allowlist.
 
-The dashboard shows the last SAP polling result and provides a read-only
-**Check SAP now** action. Normal polling runs automatically at the configured
-interval.
+The dashboard shows the last SAP polling result and provides a **Check SAP now**
+action. This action reads SAP only, but eligible records can be stored locally
+and queued for WhatsApp delivery when every delivery and approval gate is enabled.
+Normal polling runs automatically at the configured interval.
+
+Each document type is routed to its own MSG91 template. Configure
+`MSG91_TEMPLATE_NAME` for F2 and the four `MSG91_*_TEMPLATE_NAME` values shown
+in `backend/.env.example` for S1, CBRE, G2, and L2. The SAP integration remains
+strictly GET-only; it never creates, changes, cancels, or posts SAP data.
+The existing F2 template remains unchanged. The new S1, CBRE, G2 and L2 templates
+contain a PDF document header and five numbered body variables only; they deliberately
+contain no quick-reply, URL, phone, or call-to-action buttons.
 
 ## Enabling one real test send
 
@@ -148,12 +164,12 @@ simulator. The default recipient is automatically included in the backend
 allowlist. Set `MSG91_SEND_ENABLED=true` only for the controlled test. Both send
 endpoints remain blocked unless every preflight check passes.
 
-Each click on **Send sample invoice** creates a new 10-digit invoice number,
-keeps the SAP OData-shaped response structure, generates a PDF containing the
-same invoice details, stores and queues it, and sends it through the real MSG91
-path to the masked fixed test number. It does not call SAP. Because every click
-has a new invoice number, the production-style idempotency protection remains
-enabled instead of being bypassed.
+The one-click test lets an administrator choose F2, S1, CBRE, G2, or L2. Each
+click creates a new 10-digit billing-document number, keeps the SAP OData-shaped
+response structure, generates a type-specific PDF containing the same details,
+stores and queues it, and sends it through the real MSG91 path to the masked fixed
+test number. It does not call SAP. Because every click has a new document number,
+the production-style idempotency protection remains enabled instead of being bypassed.
 
 The optional callback URL is:
 

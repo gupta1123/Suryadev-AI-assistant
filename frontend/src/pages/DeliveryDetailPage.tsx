@@ -12,6 +12,13 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { AppShell } from '../components/AppShell';
 import { apiRequest } from '../lib/api';
 import {
+  billingDocumentAmountLabel,
+  billingDocumentAttachmentMessage,
+  billingDocumentLabel,
+  billingDocumentMessage,
+  billingDocumentSignature,
+} from '../lib/billing-documents';
+import {
   formatBytes,
   formatCurrency,
   formatDate,
@@ -103,6 +110,7 @@ export function DeliveryDetailPage({
   const document = job?.invoice_documents?.find((item) => item.is_current) ?? job?.invoice_documents?.[0];
   const rawStatus = message?.status ?? job?.status ?? 'loading';
   const currentStatus = rawStatus === 'read' ? 'delivered' : rawStatus;
+  const documentLabel = billingDocumentLabel(invoice?.billing_document_type);
 
   // Format status title & date
   const statusInfo = getStatusBannerText(currentStatus, message, job);
@@ -111,7 +119,7 @@ export function DeliveryDetailPage({
     <AppShell
       route={route}
       config={config}
-      eyebrow={invoice?.sap_billing_document ? `Invoice #${invoice.sap_billing_document}` : `Delivery #${jobId}`}
+      eyebrow={invoice?.sap_billing_document ? `${documentLabel} #${invoice.sap_billing_document}` : `Delivery #${jobId}`}
       title={customer?.display_name ?? 'Delivery details'}
       headerLeading={(
         <button className="back-link" type="button" onClick={() => onNavigate('/deliveries')}>
@@ -129,7 +137,7 @@ export function DeliveryDetailPage({
           </button>
           {document?.download_url && (
             <a className="button button--primary" href={document.download_url} target="_blank" rel="noreferrer">
-              <Download size={16} aria-hidden="true" /> Download invoice
+              <Download size={16} aria-hidden="true" /> Download document
             </a>
           )}
         </>
@@ -179,7 +187,7 @@ export function DeliveryDetailPage({
                 <CalendarDays size={19} aria-hidden="true" />
               </div>
               <div className="summary-tile__info">
-                <small>Invoice date</small>
+                <small>Document date</small>
                 <strong>{formatDate(invoice?.billing_document_date)}</strong>
               </div>
             </div>
@@ -199,16 +207,20 @@ export function DeliveryDetailPage({
           <div className="detail-main-layout">
             {/* Left Column: WhatsApp Message & Timeline Progress */}
             <div className="whatsapp-card">
-              <h2>WhatsApp message sent</h2>
+              <h2>WhatsApp message</h2>
 
               <div className="whatsapp-chat-box">
                 {/* Chat Bubble */}
                 <div className="whatsapp-bubble">
                   <p>Dear {variables.var_1 ?? customer?.display_name ?? 'Sri Praveen Enterprises'},</p>
-                  <p>Your invoice <strong>{variables.var_2 ?? invoice?.sap_billing_document ?? '26SG00010'}</strong> dated {variables.var_3 ?? formatDate(invoice?.billing_document_date)} has been generated.</p>
-                  <p>Invoice Amount: <strong>₹{variables.var_4 ?? Number(invoice?.total_gross_amount ?? 236).toLocaleString('en-IN') + '.00'}</strong></p>
-                  <p>Please find the invoice PDF attached above.</p>
-                  <p>Thank you,<br />Team {variables.var_5 ?? 'SuryaDev'}</p>
+                  <p>{billingDocumentMessage(
+                    invoice?.billing_document_type,
+                    variables.var_2 ?? invoice?.sap_billing_document ?? '26SG00010',
+                    variables.var_3 ?? formatDate(invoice?.billing_document_date),
+                  )}</p>
+                  <p>{billingDocumentAmountLabel(invoice?.billing_document_type)}: <strong>₹{variables.var_4 ?? Number(invoice?.total_gross_amount ?? 236).toLocaleString('en-IN') + '.00'}</strong></p>
+                  <p>{billingDocumentAttachmentMessage(invoice?.billing_document_type)}</p>
+                  <p>Thank you,<br />{billingDocumentSignature(invoice?.billing_document_type, variables.var_5 ?? 'SuryaDev')}</p>
 
                   <div className="whatsapp-bubble-footer">
                     <span>{formatTimeOnly(message?.delivered_at ?? message?.sent_at ?? job.created_at)}</span>
@@ -260,7 +272,7 @@ export function DeliveryDetailPage({
             <div className="invoice-preview-card">
               <div className="invoice-preview-header">
                 <div>
-                  <h2>Invoice preview</h2>
+                  <h2>{documentLabel} preview</h2>
                   <p>The exact PDF sent to the customer</p>
                 </div>
                 <div className="invoice-preview-actions">
@@ -281,12 +293,12 @@ export function DeliveryDetailPage({
                 <iframe
                   className="invoice-pdf-frame"
                   src={`${document.preview_url}#toolbar=1&navpanes=0&view=FitH`}
-                  title={`Invoice ${invoice?.sap_billing_document ?? jobId}`}
+                  title={`${documentLabel} ${invoice?.sap_billing_document ?? jobId}`}
                 />
               ) : (
                 <div className="invoice-preview-unavailable">
                   <strong>Preview unavailable</strong>
-                  <p>The invoice PDF could not be loaded. You can still use the download button if it is available.</p>
+                  <p>The billing document PDF could not be loaded. You can still use the download button if it is available.</p>
                 </div>
               )}
             </div>
@@ -402,9 +414,11 @@ function readTemplateVariables(attempt?: MessageAttempt): Record<string, string>
   const recipient = Array.isArray(recipients) ? asRecord(recipients[0]) : undefined;
   const components = asRecord(recipient?.components);
   const variables: Record<string, string> = {};
-  for (const key of ['body_var_1', 'body_var_2', 'body_var_3', 'body_var_4', 'body_var_5']) {
-    const component = asRecord(components?.[key]);
-    if (typeof component?.value === 'string') variables[key.replace('body_', '')] = component.value;
+  for (let index = 1; index <= 5; index += 1) {
+    const namedComponent = asRecord(components?.[`body_var_${index}`]);
+    const positionalComponent = asRecord(components?.[`body_${index}`]);
+    const value = namedComponent?.value ?? positionalComponent?.value;
+    if (typeof value === 'string') variables[`var_${index}`] = value;
   }
   return variables;
 }

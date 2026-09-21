@@ -10,6 +10,13 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { apiRequest } from '../lib/api';
+import {
+  billingDocumentAmountLabel,
+  billingDocumentAttachmentMessage,
+  billingDocumentLabel,
+  billingDocumentMessage,
+  billingDocumentSignature,
+} from '../lib/billing-documents';
 import { formatCurrency, toMessage } from '../lib/format';
 import type {
   DeliveryConfig,
@@ -34,6 +41,7 @@ export function SendInvoiceModal({
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
   const [selectedFixture, setSelectedFixture] = useState('');
   const [recipient, setRecipient] = useState('');
+  const [documentType, setDocumentType] = useState<'F2' | 'S1' | 'CBRE' | 'G2' | 'L2'>('F2');
   const [preview, setPreview] = useState<InvoicePreview | null>(null);
   const [result, setResult] = useState<SimulationResult | null>(null);
   const [loadingFixtures, setLoadingFixtures] = useState(false);
@@ -64,6 +72,7 @@ export function SendInvoiceModal({
       setResult(
         await apiRequest<SimulationResult>('/invoice-delivery/simulate', {
           method: 'POST',
+          body: JSON.stringify({ documentType }),
         }),
       );
     } catch (simulationError) {
@@ -112,7 +121,7 @@ export function SendInvoiceModal({
 
   if (result) {
     return (
-      <Modal title="Invoice queued" description="The worker is sending this delivery through MSG91." onClose={onClose}>
+      <Modal title={`${billingDocumentLabel(result.billingDocumentType)} queued`} description="The worker is sending this delivery through MSG91." onClose={onClose}>
         <div className="success-state">
           <span className="success-state__icon"><CheckCircle2 size={28} aria-hidden="true" /></span>
           <h3>{result.billingDocument}</h3>
@@ -133,7 +142,7 @@ export function SendInvoiceModal({
   return (
     <Modal
       title="New test delivery"
-      description="Run the invoice workflow without calling SAP. Real WhatsApp sending remains allowlisted."
+      description="Run the billing-document workflow without calling SAP. Real WhatsApp sending remains allowlisted."
       onClose={onClose}
       width="large"
     >
@@ -153,7 +162,7 @@ export function SendInvoiceModal({
           <div className="quick-send-copy">
             <span className="feature-icon"><Send size={22} aria-hidden="true" /></span>
             <h3>Run the complete workflow</h3>
-            <p>A unique SAP-shaped invoice and matching PDF will be generated, stored, queued and sent to your fixed test number.</p>
+            <p>A unique SAP-shaped billing document and matching PDF will be generated, stored, queued and sent to your fixed test number.</p>
             <div className="safety-list">
               <span><ShieldCheck size={16} aria-hidden="true" /> No SAP calls</span>
               <span><FileText size={16} aria-hidden="true" /> New PDF every time</span>
@@ -162,6 +171,16 @@ export function SendInvoiceModal({
           </div>
 
           <aside className="send-confirmation-card">
+            <label className="field">
+              <span>Document type</span>
+              <select value={documentType} onChange={(event) => setDocumentType(event.target.value as typeof documentType)}>
+                {config.billingDocumentTypes.map((document) => (
+                  <option key={document.type} value={document.type}>
+                    {document.type} — {document.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <p className="eyebrow">Destination</p>
             <strong className="mono destination-number">{config.defaultTestRecipient}</strong>
             <p className="muted-copy">Only this backend-allowlisted number can receive the test.</p>
@@ -172,7 +191,7 @@ export function SendInvoiceModal({
             )}
             <button className="button button--primary button--wide" type="button" disabled={!config.simulationReady || busy !== null} onClick={() => void simulateInvoice()}>
               <Send size={16} aria-hidden="true" />
-              {busy === 'simulate' ? 'Creating and queueing…' : 'Send sample invoice'}
+              {busy === 'simulate' ? 'Creating and queueing…' : `Send sample ${billingDocumentLabel(documentType).toLowerCase()}`}
             </button>
           </aside>
         </div>
@@ -189,7 +208,7 @@ export function SendInvoiceModal({
                 </label>
                 {selectedFixtureData && (
                   <div className="fixture-card field--full">
-                    <div><span>Invoice</span><strong>{selectedFixtureData.billingDocument}</strong></div>
+                    <div><span>{billingDocumentLabel(selectedFixtureData.billingDocumentType)}</span><strong>{selectedFixtureData.billingDocument}</strong></div>
                     <div><span>Customer</span><strong>{selectedFixtureData.customerName}</strong></div>
                     <div><span>Amount</span><strong>{formatCurrency(selectedFixtureData.amount, selectedFixtureData.currency)}</strong></div>
                   </div>
@@ -213,10 +232,14 @@ export function SendInvoiceModal({
                 <div className="message-bubble">
                   <span className="document-chip"><FileText size={15} aria-hidden="true" /> {preview.invoice.pdfFileName}</span>
                   <p>Dear {preview.template.variables.var_1},</p>
-                  <p>Your invoice <strong>{preview.template.variables.var_2}</strong> dated {preview.template.variables.var_3} has been generated.</p>
-                  <p>Invoice Amount: <strong>₹{preview.template.variables.var_4}</strong></p>
-                  <p>Please find the invoice PDF attached above.</p>
-                  <p>Thank you,<br />Team {preview.template.variables.var_5}</p>
+                  <p>{billingDocumentMessage(
+                    preview.invoice.billingDocumentType,
+                    preview.template.variables.var_2 ?? preview.invoice.billingDocument,
+                    preview.template.variables.var_3 ?? preview.invoice.billingDocumentDate,
+                  )}</p>
+                  <p>{billingDocumentAmountLabel(preview.invoice.billingDocumentType)}: <strong>₹{preview.template.variables.var_4}</strong></p>
+                  <p>{billingDocumentAttachmentMessage(preview.invoice.billingDocumentType)}</p>
+                  <p>Thank you,<br />{billingDocumentSignature(preview.invoice.billingDocumentType, preview.template.variables.var_5 ?? 'SuryaDev')}</p>
                 </div>
                 <div className="validation-stack">
                   {preview.validations.map((validation) => (

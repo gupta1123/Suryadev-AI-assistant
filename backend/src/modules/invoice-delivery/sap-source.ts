@@ -5,6 +5,10 @@ import {
 import type { InvoiceCandidate } from './domain.js';
 import type { InvoiceSource, InvoiceSourceSummary } from './invoice-source.js';
 import {
+  getBillingDocumentDefinition,
+  SUPPORTED_BILLING_DOCUMENT_TYPES,
+} from './document-policy.js';
+import {
   escapeODataString,
   isRecord,
   type ODataRecord,
@@ -20,11 +24,14 @@ export class SapInvoiceSource implements InvoiceSource {
       .map((customer) => `SoldToParty eq '${escapeODataString(customer)}'`)
       .join(' or ');
     const start = `${env.SAP_POLL_START_DATE}T00:00:00`;
+    const documentTypeFilter = SUPPORTED_BILLING_DOCUMENT_TYPES
+      .map((type) => `BillingDocumentType eq '${type}'`)
+      .join(' or ');
     const rows = await this.client.collection(
       'API_BILLING_DOCUMENT_SRV',
       'A_BillingDocument',
       {
-        filter: `(${customerFilter}) and CreationDate ge datetime'${start}'`,
+        filter: `(${customerFilter}) and (${documentTypeFilter}) and CreationDate ge datetime'${start}'`,
         orderBy: 'CreationDate asc,CreationTime asc,BillingDocument asc',
         top: 500,
       },
@@ -32,14 +39,18 @@ export class SapInvoiceSource implements InvoiceSource {
 
     return rows
       .filter((row) => isEligibleHeader(row))
-      .map((row) => ({
-        id: text(row.BillingDocument),
-        label: `SAP invoice ${text(row.BillingDocument)}`,
-        billingDocument: text(row.BillingDocument),
-        customerName: text(row.SoldToParty),
-        amount: number(row.TotalGrossAmount, number(row.TotalNetAmount)),
-        currency: text(row.TransactionCurrency),
-      }));
+      .map((row) => {
+        const definition = getBillingDocumentDefinition(text(row.BillingDocumentType));
+        return {
+          id: text(row.BillingDocument),
+          label: `SAP ${definition?.label.toLowerCase() ?? 'billing document'} ${text(row.BillingDocument)}`,
+          billingDocument: text(row.BillingDocument),
+          billingDocumentType: text(row.BillingDocumentType),
+          customerName: text(row.SoldToParty),
+          amount: number(row.TotalGrossAmount, number(row.TotalNetAmount)),
+          currency: text(row.TransactionCurrency),
+        };
+      });
   }
 
   async get(id: string): Promise<InvoiceCandidate> {
@@ -88,10 +99,14 @@ export class SapInvoiceSource implements InvoiceSource {
     const totalGross = number(header.TotalGrossAmount, totalNet);
     const totalTax = number(header.TotalTaxAmount, totalGross - totalNet);
     const creationDateTime = combineSapDateAndTime(header.CreationDate, header.CreationTime);
+    const documentDefinition = getBillingDocumentDefinition(text(header.BillingDocumentType));
+    if (!documentDefinition) {
+      throw new Error(`SAP billing document ${id} has unsupported type ${text(header.BillingDocumentType)}`);
+    }
 
     return {
       fixtureId: id,
-      fixtureLabel: `SAP invoice ${id}`,
+      fixtureLabel: `SAP ${documentDefinition.label.toLowerCase()} ${id}`,
       billingDocument: id,
       billingDocumentType: text(header.BillingDocumentType),
       ...(text(header.BillingDocumentCategory)
@@ -144,7 +159,7 @@ export class SapInvoiceSource implements InvoiceSource {
         boolean(header.BillingDocumentIsCancelled),
       items: items.map(normalizeItem),
       pdf: {
-        fileName: `Invoice-${id}.pdf`,
+        fileName: `${documentDefinition.fileNamePrefix}-${id}.pdf`,
         mimeType: 'application/pdf',
         base64: pdf,
       },
@@ -176,6 +191,7 @@ function isEligibleHeader(row: ODataRecord): boolean {
   return Boolean(
     text(row.BillingDocument) &&
       sapAllowedCustomers.has(customer) &&
+      Boolean(getBillingDocumentDefinition(text(row.BillingDocumentType))) &&
       creationDate >= env.SAP_POLL_START_DATE,
   );
 }

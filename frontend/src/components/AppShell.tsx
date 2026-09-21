@@ -44,7 +44,7 @@ export function AppShell({
       <aside className="sidebar">
         <button className="brand" type="button" onClick={() => onNavigate('/')} aria-label="Go to overview">
           <span className="brand-mark">SD</span>
-          <span className="brand-copy"><strong>SuryaDev</strong><small>Invoice Delivery</small></span>
+          <span className="brand-copy"><strong>SuryaDev</strong><small>Billing Documents</small></span>
         </button>
 
         <nav className="primary-nav" aria-label="Primary navigation">

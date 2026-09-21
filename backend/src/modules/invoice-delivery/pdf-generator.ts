@@ -1,4 +1,5 @@
 export type DummyInvoicePdfInput = {
+  documentLabel?: string;
   invoiceNumber: string;
   invoiceDate: string;
   customerName: string;
@@ -7,16 +8,17 @@ export type DummyInvoicePdfInput = {
 };
 
 export function generateDummyInvoicePdf(input: DummyInvoicePdfInput): string {
+  const documentLabel = input.documentLabel ?? 'Invoice';
   const content = [
     'BT',
     '/F1 22 Tf',
     '72 710 Td',
-    '(SURYADEV TEST INVOICE) Tj',
+    `(${escapePdfText(`SURYADEV TEST ${documentLabel.toUpperCase()}`)}) Tj`,
     '/F1 12 Tf',
     '0 -42 Td',
-    `(${escapePdfText(`Invoice: ${input.invoiceNumber}`)}) Tj`,
+    `(${escapePdfText(`${documentLabel}: ${input.invoiceNumber}`)}) Tj`,
     '0 -22 Td',
-    `(${escapePdfText(`Invoice date: ${input.invoiceDate}`)}) Tj`,
+    `(${escapePdfText(`${documentLabel} date: ${input.invoiceDate}`)}) Tj`,
     '0 -22 Td',
     `(${escapePdfText(`Customer: ${input.customerName}`)}) Tj`,
     '0 -22 Td',

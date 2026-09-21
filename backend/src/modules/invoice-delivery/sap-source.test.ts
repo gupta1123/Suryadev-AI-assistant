@@ -11,6 +11,30 @@ import {
 } from './sap-source.js';
 
 describe('SAP value normalization', () => {
+  it('lists only the five supported billing document types in the SAP query', async () => {
+    let filter = '';
+    const fakeClient = {
+      async collection(
+        _service: string,
+        _entitySet: string,
+        options: { filter?: string } = {},
+      ): Promise<ODataRecord[]> {
+        filter = options.filter ?? '';
+        return [];
+      },
+    } as unknown as SapODataClient;
+    const customerWasAlreadyAllowed = sapAllowedCustomers.has('550071');
+    sapAllowedCustomers.add('550071');
+    try {
+      await new SapInvoiceSource(fakeClient).list();
+      for (const type of ['F2', 'S1', 'CBRE', 'G2', 'L2']) {
+        assert.match(filter, new RegExp(`BillingDocumentType eq '${type}'`));
+      }
+    } finally {
+      if (!customerWasAlreadyAllowed) sapAllowedCustomers.delete('550071');
+    }
+  });
+
   it('normalizes Indian customer phone numbers to E.164 digits', () => {
     assert.equal(normalizeIndianPhone('7019339764'), '917019339764');
     assert.equal(normalizeIndianPhone('+91 70193 39764'), '917019339764');

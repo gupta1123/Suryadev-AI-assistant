@@ -1,14 +1,22 @@
 import { randomUUID } from 'node:crypto';
-import { digitsOnly, env, whatsappTestRecipients } from '../../config/env.js';
+import {
+  digitsOnly,
+  env,
+  isInvoiceDeliveryRuntimeConfigured,
+  whatsappTestRecipients,
+} from '../../config/env.js';
 import {
   buildMsg91InvoicePayload,
+  isWhatsappTemplateApproved,
   sanitizeMsg91Payload,
   sendInvoiceTemplate,
 } from './msg91-client.js';
 import { formatInvoiceAmount, formatInvoiceDate } from './policy.js';
+import { getBillingDocumentDefinition } from './document-policy.js';
 import {
   claimNextDeliveryJob,
   createInvoiceDocumentUrl,
+  deferClaimedJob,
   getDeliveryJobContext,
   getOrCreateMessage,
   markDeliveryAccepted,
@@ -22,7 +30,7 @@ let running = false;
 const workerName = `invoice-delivery-${randomUUID().slice(0, 8)}`;
 
 export function startDeliveryWorker(): () => void {
-  if (timer) return stopDeliveryWorker;
+  if (timer || !isInvoiceDeliveryRuntimeConfigured) return stopDeliveryWorker;
   timer = setInterval(() => {
     void processDeliveryQueue();
   }, env.JOB_POLL_INTERVAL_MS);
@@ -37,7 +45,7 @@ export function stopDeliveryWorker(): void {
 }
 
 export async function processDeliveryQueue(): Promise<void> {
-  if (running) return;
+  if (running || !isInvoiceDeliveryRuntimeConfigured) return;
   running = true;
   try {
     while (true) {
@@ -68,9 +76,28 @@ async function processClaimedJob(job: Awaited<ReturnType<typeof claimNextDeliver
     throw new Error('Delivery worker refused a recipient outside the test allowlist');
   }
 
+  const documentDefinition = getBillingDocumentDefinition(context.invoice.billing_document_type);
+  if (!documentDefinition) {
+    throw new Error(`Delivery worker refused unsupported billing document type ${context.invoice.billing_document_type}`);
+  }
+  if (
+    !(await isWhatsappTemplateApproved(
+      documentDefinition.templateName,
+      env.MSG91_TEMPLATE_LANGUAGE,
+    ))
+  ) {
+    await deferClaimedJob(
+      context.id,
+      `Waiting for MSG91 template ${documentDefinition.templateName} approval for ${env.MSG91_TEMPLATE_LANGUAGE}`,
+    );
+    return;
+  }
   const message = await getOrCreateMessage(context);
   const documentUrl = await createInvoiceDocumentUrl(context);
   const templateInput = {
+    templateName: documentDefinition.templateName,
+    templateLanguage: env.MSG91_TEMPLATE_LANGUAGE,
+    parameterFormat: documentDefinition.parameterFormat,
     recipient,
     documentUrl,
     documentFileName:

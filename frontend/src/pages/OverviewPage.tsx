@@ -1,4 +1,4 @@
-import { Activity, CheckCircle2, RefreshCw, Send, TriangleAlert } from 'lucide-react';
+import { Activity, CheckCircle2, FileCheck2, RefreshCw, Send, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { AppShell } from '../components/AppShell';
 import { DeliveryTable } from '../components/DeliveryTable';
@@ -9,6 +9,7 @@ import {
   relationOne,
   type AdminUser,
   type AppRoute,
+  type BillingDocumentTemplateReadiness,
   type DeliveryConfig,
   type DeliveryJob,
   type SapPollingStatus,
@@ -29,7 +30,9 @@ export function OverviewPage({
 }) {
   const [config, setConfig] = useState<DeliveryConfig | null>(null);
   const [jobs, setJobs] = useState<DeliveryJob[]>([]);
+  const [templateReadiness, setTemplateReadiness] = useState<BillingDocumentTemplateReadiness | null>(null);
   const [loading, setLoading] = useState(true);
+  const [checkingTemplates, setCheckingTemplates] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [error, setError] = useState('');
 
@@ -49,7 +52,23 @@ export function OverviewPage({
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  const loadTemplateReadiness = useCallback(async () => {
+    setCheckingTemplates(true);
+    try {
+      setTemplateReadiness(
+        await apiRequest<BillingDocumentTemplateReadiness>('/invoice-delivery/template-status'),
+      );
+    } catch {
+      setTemplateReadiness(null);
+    } finally {
+      setCheckingTemplates(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+    void loadTemplateReadiness();
+  }, [load, loadTemplateReadiness]);
   const deliveryStatus = (job: DeliveryJob) => relationOne(job.messages)?.status ?? job.status;
   const sent = jobs.filter((job) => ['sent', 'delivered', 'read'].includes(deliveryStatus(job))).length;
   const delivered = jobs.filter((job) => ['delivered', 'read'].includes(deliveryStatus(job))).length;
@@ -60,7 +79,7 @@ export function OverviewPage({
     <AppShell
       route={route}
       config={config}
-      eyebrow="Invoice delivery agent"
+      eyebrow="Billing document delivery agent"
       title="Overview"
       onNavigate={onNavigate}
       onNewDelivery={liveMode ? undefined : () => setModalOpen(true)}
@@ -88,6 +107,47 @@ export function OverviewPage({
         <MetricCard label="Sent" value={sent} detail="Confirmed by MSG91" tone="success" icon={<CheckCircle2 size={18} />} />
         <MetricCard label="Delivered" value={delivered} detail="Reached recipient device" tone="success" icon={<CheckCircle2 size={18} />} />
         <MetricCard label="Failed" value={failed} detail="Needs review" tone={failed ? 'danger' : 'neutral'} icon={<TriangleAlert size={18} />} />
+      </section>
+
+      <section className="panel document-readiness-panel" aria-label="Billing document automation readiness">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">SAP → WhatsApp routing</p>
+            <h2>Document automation readiness</h2>
+            <p className="section-description">Read-only SAP monitoring for TMT billing documents. Every type uses its own approved WhatsApp template.</p>
+          </div>
+          <button className="button button--secondary" type="button" disabled={checkingTemplates} onClick={() => void loadTemplateReadiness()}>
+            <RefreshCw size={15} className={checkingTemplates ? 'spin' : ''} aria-hidden="true" /> Check templates
+          </button>
+        </div>
+        <div className="document-flow-grid">
+          {(config?.billingDocumentTypes ?? []).map((documentType) => {
+            const liveStatus = templateReadiness?.templates.find((item) => item.type === documentType.type);
+            return (
+              <article className="document-flow-card" key={documentType.type}>
+                <div className="document-flow-card__heading">
+                  <span className="document-type-code">{documentType.type}</span>
+                  <span className={`template-state ${liveStatus?.approved ? 'template-state--approved' : 'template-state--pending'}`}>
+                    {checkingTemplates
+                      ? 'Checking…'
+                      : !templateReadiness
+                        ? 'Unavailable'
+                        : liveStatus?.approved
+                          ? 'Approved'
+                          : 'Not approved'}
+                  </span>
+                </div>
+                <FileCheck2 size={19} aria-hidden="true" />
+                <strong>{documentType.label}</strong>
+                <small className="mono">{documentType.templateName}</small>
+              </article>
+            );
+          })}
+        </div>
+        <div className="document-scope-note">
+          <span>TMT only</span>
+          <p>Other products such as Sponge Iron, Power and Fly Ash remain excluded from automatic delivery.</p>
+        </div>
       </section>
 
       <section className="panel recent-panel">

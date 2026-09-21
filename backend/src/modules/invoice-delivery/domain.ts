@@ -67,6 +67,7 @@ export type InvoicePreview = {
   fixtureLabel: string;
   invoice: {
     billingDocument: string;
+    billingDocumentType: string;
     billingDocumentDate: string;
     customerName: string;
     customerNumber: string;
@@ -94,6 +95,9 @@ export type PersistedDelivery = {
 };
 
 export type Msg91TemplateInput = {
+  templateName: string;
+  templateLanguage: string;
+  parameterFormat: 'named' | 'positional';
   recipient: string;
   documentUrl: string;
   documentFileName: string;

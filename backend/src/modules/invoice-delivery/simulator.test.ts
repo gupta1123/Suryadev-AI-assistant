@@ -38,6 +38,35 @@ describe('invoice simulator', () => {
     assert.equal(candidate.pdf.fileName, `TEST-Invoice-${candidate.billingDocument}.pdf`);
   });
 
+  it('creates matching SAP-shaped PDFs for all five supported document types', async () => {
+    const base = await new FixtureInvoiceSource().getRaw('sap-invoice-0090000001');
+    const expected = {
+      F2: ['Invoice', 'Invoice'],
+      S1: ['Cancelled-Invoice', 'Cancelled invoice'],
+      CBRE: ['Return-Credit-Memo', 'Return credit memo'],
+      G2: ['Credit-Memo', 'Credit memo'],
+      L2: ['Debit-Memo', 'Debit memo'],
+    } as const;
+
+    for (const [type, [filePrefix, documentLabel]] of Object.entries(expected)) {
+      const fixture = createSimulatedSapFixture(
+        base,
+        new Date('2026-07-28T12:34:56.789Z'),
+        undefined,
+        type as keyof typeof expected,
+      );
+      const candidate = normalizeFixture(fixture);
+      const pdf = Buffer.from(candidate.pdf.base64, 'base64').toString('latin1');
+
+      assert.equal(candidate.billingDocumentType, type);
+      assert.equal(
+        candidate.pdf.fileName,
+        `TEST-${filePrefix}-${candidate.billingDocument}.pdf`,
+      );
+      assert.equal(pdf.includes(`${documentLabel}: ${candidate.billingDocument}`), true);
+    }
+  });
+
   it('uses the current Indian business date near the UTC day boundary', () => {
     assert.equal(
       dateInIndia(new Date('2026-08-13T20:00:00.000Z')),

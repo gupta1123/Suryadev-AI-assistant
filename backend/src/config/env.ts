@@ -23,6 +23,9 @@ const envSchema = z.object({
   SAP_POLL_INTERVAL_MS: z.coerce.number().int().min(5000).max(300000).default(15000),
   SAP_POLL_START_DATE: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default('2026-07-29'),
   SAP_ALLOWED_CUSTOMERS: z.string().default(''),
+  SAP_TMT_MATERIAL_IDS: z.string().default(''),
+  SAP_TMT_MATERIAL_PREFIXES: z.string().default('TMT,STEEL-TMT'),
+  SAP_TMT_MATERIAL_GROUPS: z.string().default(''),
   SAP_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(30000),
   JOB_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).max(60000).default(5000),
   JOB_LOCK_TIMEOUT_MINUTES: z.coerce.number().int().min(1).max(120).default(15),
@@ -30,6 +33,10 @@ const envSchema = z.object({
   MSG91_INTEGRATED_NUMBER: z.string().optional(),
   MSG91_SEND_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   MSG91_TEMPLATE_NAME: z.string().min(1).default('share_invoice'),
+  MSG91_CANCELLATION_TEMPLATE_NAME: z.string().min(1).default('share_invoice_cancellation_v2'),
+  MSG91_RETURN_CREDIT_MEMO_TEMPLATE_NAME: z.string().min(1).default('share_return_credit_memo_v2'),
+  MSG91_CREDIT_MEMO_TEMPLATE_NAME: z.string().min(1).default('share_credit_memo'),
+  MSG91_DEBIT_MEMO_TEMPLATE_NAME: z.string().min(1).default('share_debit_memo'),
   MSG91_TEMPLATE_LANGUAGE: z.string().min(1).default('en'),
   MSG91_TEMPLATE_TEAM_NAME: z.string().min(1).default('SuryaDev'),
   MSG91_WEBHOOK_SECRET: z.string().min(16).optional(),
@@ -90,6 +97,13 @@ export const isMsg91Configured = Boolean(
   env.MSG91_AUTHKEY && digitsOnly(env.MSG91_INTEGRATED_NUMBER),
 );
 
+export const isInvoiceDeliveryRuntimeConfigured = Boolean(
+  isSupabaseServiceConfigured &&
+    isMsg91Configured &&
+    env.MSG91_SEND_ENABLED &&
+    (env.DELIVERY_MODE !== 'test' || whatsappTestRecipients.size > 0),
+);
+
 export const isSapConfigured = Boolean(
   env.SAP_API_BASE_URL && env.SAP_API_USERNAME && env.SAP_API_PASSWORD,
 );
@@ -98,9 +112,20 @@ export const sapAllowedCustomers = new Set(
   env.SAP_ALLOWED_CUSTOMERS.split(',').map((value) => value.trim()).filter(Boolean),
 );
 
+function upperCaseSet(value: string): Set<string> {
+  return new Set(
+    value.split(',').map((item) => item.trim().toUpperCase()).filter(Boolean),
+  );
+}
+
+export const sapTmtMaterialIds = upperCaseSet(env.SAP_TMT_MATERIAL_IDS);
+export const sapTmtMaterialPrefixes = upperCaseSet(env.SAP_TMT_MATERIAL_PREFIXES);
+export const sapTmtMaterialGroups = upperCaseSet(env.SAP_TMT_MATERIAL_GROUPS);
+
 export const isSapPollingConfigured = Boolean(
   env.INVOICE_SOURCE === 'sap' &&
     env.SAP_POLL_ENABLED &&
+    isInvoiceDeliveryRuntimeConfigured &&
     isSapConfigured &&
     sapAllowedCustomers.size > 0,
 );
