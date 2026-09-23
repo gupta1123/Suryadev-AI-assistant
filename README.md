@@ -113,19 +113,31 @@ SAP_API_USERNAME=<communication-user>
 SAP_API_PASSWORD=<communication-user-password>
 SAP_POLL_ENABLED=true
 SAP_POLL_INTERVAL_MS=15000
-SAP_POLL_START_DATE=2026-07-29
-SAP_ALLOWED_CUSTOMERS=550071
-SAP_TMT_MATERIAL_IDS=
+SAP_POLL_START_DATE=2026-09-23
+SAP_POLL_START_AT=2026-09-23T10:58:34.000Z
+SAP_ALLOWED_CUSTOMERS=510719,530384,510672,510013
+SAP_ALLOWED_BILLING_DOCUMENTS=
+SAP_TMT_MATERIAL_IDS=30000123,30000038,30000130,30000124
 SAP_TMT_MATERIAL_PREFIXES=TMT,STEEL-TMT
 SAP_TMT_MATERIAL_GROUPS=
 ```
 
 During controlled testing, keep `DELIVERY_MODE=test` and put only the approved
-country-code-prefixed number in `WHATSAPP_TEST_RECIPIENTS`. A newly created SAP
+country-code-prefixed numbers in `WHATSAPP_TEST_RECIPIENTS`. There are two
+mutually exclusive test boundaries: set `SAP_ALLOWED_BILLING_DOCUMENTS` to an
+exact comma-separated list for previously created documents, or leave it empty
+and set `SAP_POLL_START_AT` to a UTC activation timestamp for future documents.
+The exact-document list takes precedence if both are set. Test-mode SAP polling
+and sending remain disabled unless one of these boundaries is configured.
+Use the future-document mode when arming a limited UAT customer group; it rejects
+anything created before activation even if the customer and phone are allowed.
+A newly created SAP
 billing document is deliverable only when all of these are true:
 
 - its sold-to customer is explicitly allowlisted;
 - its SAP creation date is on or after the configured start date;
+- in future-document test mode, its SAP creation timestamp is at or after
+  `SAP_POLL_START_AT`;
 - its document type is F2, S1, CBRE, G2, or L2;
 - at least one item matches the configured TMT material IDs, prefixes, groups,
   or contains the explicit `TMT` token in its SAP item description;
@@ -136,7 +148,10 @@ billing document is deliverable only when all of these are true:
 The dashboard shows the last SAP polling result and provides a **Check SAP now**
 action. This action reads SAP only, but eligible records can be stored locally
 and queued for WhatsApp delivery when every delivery and approval gate is enabled.
-Normal polling runs automatically at the configured interval.
+Normal polling runs automatically at the configured interval. It is not an SAP
+save-event webhook: detection takes up to the poll interval plus retrieval and
+delivery time. Existing document IDs are protected from duplicate sends by a
+recipient-specific idempotency key.
 
 Each document type is routed to its own MSG91 template. Configure
 `MSG91_TEMPLATE_NAME` for F2 and the four `MSG91_*_TEMPLATE_NAME` values shown

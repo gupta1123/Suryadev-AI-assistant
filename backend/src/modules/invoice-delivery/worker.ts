@@ -3,6 +3,8 @@ import {
   digitsOnly,
   env,
   isInvoiceDeliveryRuntimeConfigured,
+  isSapTestDocumentAllowed,
+  sapAllowedCustomers,
   whatsappTestRecipients,
 } from '../../config/env.js';
 import {
@@ -68,6 +70,17 @@ export async function processDeliveryQueue(): Promise<void> {
 async function processClaimedJob(job: Awaited<ReturnType<typeof claimNextDeliveryJob>> & {}): Promise<void> {
   if (!job) return;
   const context = await getDeliveryJobContext(job);
+  if (
+    env.DELIVERY_MODE === 'test' &&
+    env.INVOICE_SOURCE === 'sap' &&
+    (!sapAllowedCustomers.has(context.customer.sap_customer_number) ||
+      !isSapTestDocumentAllowed(
+        context.invoice.sap_billing_document,
+        context.invoice.creation_datetime,
+      ))
+  ) {
+    throw new Error('Delivery worker refused a billing document outside the SAP test boundary');
+  }
   const recipient = digitsOnly(String(context.metadata.actual_recipient ?? ''));
   if (
     env.DELIVERY_MODE === 'test' &&

@@ -33,6 +33,7 @@ export type DeliveryJobContext = ClaimedJob & {
   customer: {
     id: number;
     display_name: string;
+    sap_customer_number: string;
   };
   invoice: {
     id: number;
@@ -41,6 +42,7 @@ export type DeliveryJobContext = ClaimedJob & {
     transaction_currency: string;
     total_gross_amount: number;
     billing_document_type: string;
+    creation_datetime: string | null;
   };
   document: {
     id: number;
@@ -347,13 +349,13 @@ export async function getDeliveryJobContext(job: ClaimedJob): Promise<DeliveryJo
   const client = getSupabaseServerClient();
   const [customer, invoice, document] = await Promise.all([
     requiredSingle(
-      client.from('customers').select('id,display_name').eq('id', job.customer_id).single(),
+      client.from('customers').select('id,display_name,sap_customer_number').eq('id', job.customer_id).single(),
       'Delivery customer not found',
     ),
     requiredSingle(
       client
         .from('invoices')
-        .select('id,sap_billing_document,billing_document_type,billing_document_date,transaction_currency,total_gross_amount')
+        .select('id,sap_billing_document,billing_document_type,billing_document_date,creation_datetime,transaction_currency,total_gross_amount')
         .eq('id', job.primary_invoice_id)
         .single(),
       'Delivery invoice not found',

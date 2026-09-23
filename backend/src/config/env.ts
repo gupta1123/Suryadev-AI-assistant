@@ -22,7 +22,9 @@ const envSchema = z.object({
   SAP_POLL_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   SAP_POLL_INTERVAL_MS: z.coerce.number().int().min(5000).max(300000).default(15000),
   SAP_POLL_START_DATE: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default('2026-07-29'),
+  SAP_POLL_START_AT: z.union([z.literal(''), z.string().datetime({ offset: true })]).default(''),
   SAP_ALLOWED_CUSTOMERS: z.string().default(''),
+  SAP_ALLOWED_BILLING_DOCUMENTS: z.string().default(''),
   SAP_TMT_MATERIAL_IDS: z.string().default(''),
   SAP_TMT_MATERIAL_PREFIXES: z.string().default('TMT,STEEL-TMT'),
   SAP_TMT_MATERIAL_GROUPS: z.string().default(''),
@@ -93,6 +95,27 @@ export const whatsappTestRecipients = new Set([
   defaultWhatsappTestRecipient,
 ].filter(Boolean));
 
+export const sapAllowedBillingDocuments = new Set(
+  env.SAP_ALLOWED_BILLING_DOCUMENTS.split(',').map((value) => value.trim()).filter(Boolean),
+);
+
+export function isSapTestBoundaryConfigured(): boolean {
+  return sapAllowedBillingDocuments.size > 0 || Boolean(env.SAP_POLL_START_AT);
+}
+
+export function isSapTestDocumentAllowed(
+  billingDocument: string,
+  creationDateTime: string | null | undefined,
+): boolean {
+  if (env.DELIVERY_MODE !== 'test') return true;
+  if (sapAllowedBillingDocuments.size > 0) {
+    return sapAllowedBillingDocuments.has(billingDocument);
+  }
+  if (!env.SAP_POLL_START_AT || !creationDateTime) return false;
+  const createdAt = Date.parse(creationDateTime);
+  return Number.isFinite(createdAt) && createdAt >= Date.parse(env.SAP_POLL_START_AT);
+}
+
 export const isMsg91Configured = Boolean(
   env.MSG91_AUTHKEY && digitsOnly(env.MSG91_INTEGRATED_NUMBER),
 );
@@ -101,7 +124,9 @@ export const isInvoiceDeliveryRuntimeConfigured = Boolean(
   isSupabaseServiceConfigured &&
     isMsg91Configured &&
     env.MSG91_SEND_ENABLED &&
-    (env.DELIVERY_MODE !== 'test' || whatsappTestRecipients.size > 0),
+    (env.DELIVERY_MODE !== 'test' ||
+      (whatsappTestRecipients.size > 0 &&
+        (env.INVOICE_SOURCE !== 'sap' || isSapTestBoundaryConfigured()))),
 );
 
 export const isSapConfigured = Boolean(
@@ -127,7 +152,8 @@ export const isSapPollingConfigured = Boolean(
     env.SAP_POLL_ENABLED &&
     isInvoiceDeliveryRuntimeConfigured &&
     isSapConfigured &&
-    sapAllowedCustomers.size > 0,
+    sapAllowedCustomers.size > 0 &&
+    (env.DELIVERY_MODE !== 'test' || isSapTestBoundaryConfigured()),
 );
 
 export const paymentTestRecipient = digitsOnly(env.PAYMENT_TEST_RECIPIENT);

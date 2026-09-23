@@ -3,6 +3,7 @@ import {
   env,
   isSapPollingConfigured,
   sapAllowedCustomers,
+  isSapTestDocumentAllowed,
   whatsappTestRecipients,
 } from '../../config/env.js';
 import {
@@ -160,6 +161,9 @@ export function automaticDeliveryBlocker(
 ): string | null {
   const definition = getBillingDocumentDefinition(candidate.billingDocumentType);
   if (!definition) return 'billing document type is not supported';
+  if (!isSapTestDocumentAllowed(candidate.billingDocument, candidate.creationDateTime)) {
+    return 'billing document is outside the test document boundary';
+  }
   if (!sapAllowedCustomers.has(candidate.customer.customerNumber)) {
     return 'customer is outside the SAP allowlist';
   }

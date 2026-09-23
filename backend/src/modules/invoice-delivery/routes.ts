@@ -115,6 +115,10 @@ invoiceDeliveryRouter.get('/config', (_request, response) => {
       sapPollingReady: isSapPollingConfigured,
       sapPollIntervalMs: env.SAP_POLL_INTERVAL_MS,
       sapPollStartDate: env.SAP_POLL_START_DATE,
+      sapPollStartAt: env.SAP_POLL_START_AT || null,
+      sapTestBoundaryMode: env.DELIVERY_MODE === 'test'
+        ? (env.SAP_ALLOWED_BILLING_DOCUMENTS ? 'exact_documents' : 'created_after')
+        : null,
       sapAllowedCustomers: [...sapAllowedCustomers],
       tmtMaterialIds: [...sapTmtMaterialIds],
       tmtMaterialPrefixes: [...sapTmtMaterialPrefixes],

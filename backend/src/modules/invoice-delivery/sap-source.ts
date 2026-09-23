@@ -1,6 +1,9 @@
 import {
   env,
+  sapAllowedBillingDocuments,
   sapAllowedCustomers,
+  isSapTestBoundaryConfigured,
+  isSapTestDocumentAllowed,
 } from '../../config/env.js';
 import type { InvoiceCandidate } from './domain.js';
 import type { InvoiceSource, InvoiceSourceSummary } from './invoice-source.js';
@@ -23,15 +26,22 @@ export class SapInvoiceSource implements InvoiceSource {
     const customerFilter = [...sapAllowedCustomers]
       .map((customer) => `SoldToParty eq '${escapeODataString(customer)}'`)
       .join(' or ');
-    const start = `${env.SAP_POLL_START_DATE}T00:00:00`;
+    const startDate = env.DELIVERY_MODE === 'test' && sapAllowedBillingDocuments.size === 0 && env.SAP_POLL_START_AT
+      ? [env.SAP_POLL_START_DATE, new Date(env.SAP_POLL_START_AT).toISOString().slice(0, 10)].sort().at(-1)!
+      : env.SAP_POLL_START_DATE;
+    const start = `${startDate}T00:00:00`;
     const documentTypeFilter = SUPPORTED_BILLING_DOCUMENT_TYPES
       .map((type) => `BillingDocumentType eq '${type}'`)
       .join(' or ');
+    const billingDocumentFilter = [...sapAllowedBillingDocuments]
+      .map((id) => `BillingDocument eq '${escapeODataString(id)}'`)
+      .join(' or ');
+    if (env.DELIVERY_MODE === 'test' && !isSapTestBoundaryConfigured()) return [];
     const rows = await this.client.collection(
       'API_BILLING_DOCUMENT_SRV',
       'A_BillingDocument',
       {
-        filter: `(${customerFilter}) and (${documentTypeFilter}) and CreationDate ge datetime'${start}'`,
+        filter: `(${customerFilter}) and (${documentTypeFilter}) and CreationDate ge datetime'${start}'${billingDocumentFilter ? ` and (${billingDocumentFilter})` : ''}`,
         orderBy: 'CreationDate asc,CreationTime asc,BillingDocument asc',
         top: 500,
       },
@@ -190,6 +200,10 @@ function isEligibleHeader(row: ODataRecord): boolean {
   const creationDate = sapDateOnly(row.CreationDate);
   return Boolean(
     text(row.BillingDocument) &&
+      isSapTestDocumentAllowed(
+        text(row.BillingDocument),
+        combineSapDateAndTime(row.CreationDate, row.CreationTime),
+      ) &&
       sapAllowedCustomers.has(customer) &&
       Boolean(getBillingDocumentDefinition(text(row.BillingDocumentType))) &&
       creationDate >= env.SAP_POLL_START_DATE,
