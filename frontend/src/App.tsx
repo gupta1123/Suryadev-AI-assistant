@@ -1,15 +1,10 @@
 import {
   AlertCircle,
-  CheckCircle2,
+  ArrowRight,
+  CheckCheck,
   Eye,
   EyeOff,
-  FileCheck2,
-  FileText,
   LockKeyhole,
-  LogIn,
-  MessageCircleMore,
-  ShieldCheck,
-  UserRound,
 } from 'lucide-react';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import logoImg from './assets/suryadev-logo.jpg';
@@ -17,7 +12,10 @@ import { apiRequest, ApiError, AUTH_UNAUTHORIZED_EVENT } from './lib/api';
 import { DeliveriesPage } from './pages/DeliveriesPage';
 import { DeliveryDetailPage } from './pages/DeliveryDetailPage';
 import { OverviewPage } from './pages/OverviewPage';
-import { HelpRequestsPage } from './pages/HelpRequestsPage';
+import { InboxPage } from './pages/InboxPage';
+import { CustomersPage } from './pages/CustomersPage';
+import { CustomerDetailPage } from './pages/CustomerDetailPage';
+import { SettingsPage } from './pages/SettingsPage';
 import { PaymentFollowUpsPage } from './pages/PaymentFollowUpsPage';
 import { PaymentFollowUpDetailPage } from './pages/PaymentFollowUpDetailPage';
 import type { AdminUser, AppRoute } from './types';
@@ -136,106 +134,74 @@ function Router({
 
   const navigate = useCallback((nextPath: string) => {
     if (window.location.pathname !== nextPath) {
-      window.history.pushState(null, '', nextPath);
+      // Remember where we came from so detail pages can offer a precise "back".
+      window.history.pushState({ from: window.location.pathname }, '', nextPath);
     }
     setPath(nextPath);
   }, []);
 
   const route = parseRoute(path);
+  const shared = { route, onNavigate: navigate, user, onLogout, loggingOut };
 
-  if (route.page === 'overview') {
-    return (
-      <OverviewPage
-        route={route}
-        onNavigate={navigate}
-        user={user}
-        onLogout={onLogout}
-        loggingOut={loggingOut}
-      />
-    );
+  // Keep old links working by rewriting them to the new addresses.
+  useEffect(() => {
+    const canonical = canonicalPath(path);
+    if (canonical !== path) {
+      window.history.replaceState(window.history.state, '', canonical);
+      setPath(canonical);
+    }
+  }, [path]);
+
+  switch (route.page) {
+    case 'inbox':
+      return <InboxPage {...shared} />;
+    case 'deliveries':
+      return <DeliveriesPage {...shared} />;
+    case 'delivery':
+      return <DeliveryDetailPage {...shared} jobId={route.jobId} />;
+    case 'customers':
+      return <CustomersPage {...shared} />;
+    case 'customer':
+      return <CustomerDetailPage {...shared} customerId={route.customerId} />;
+    case 'paymentFollowUps':
+      return <PaymentFollowUpsPage {...shared} />;
+    case 'paymentFollowUp':
+      return <PaymentFollowUpDetailPage {...shared} caseId={route.caseId} />;
+    case 'settings':
+      return <SettingsPage {...shared} />;
+    default:
+      return <OverviewPage {...shared} />;
   }
-
-  if (route.page === 'deliveries') {
-    return (
-      <DeliveriesPage
-        route={route}
-        onNavigate={navigate}
-        user={user}
-        onLogout={onLogout}
-        loggingOut={loggingOut}
-      />
-    );
-  }
-
-  if (route.page === 'delivery' && route.jobId) {
-    return (
-      <DeliveryDetailPage
-        route={route}
-        jobId={route.jobId}
-        onNavigate={navigate}
-        user={user}
-        onLogout={onLogout}
-        loggingOut={loggingOut}
-      />
-    );
-  }
-
-  if (route.page === 'helpRequests') {
-    return (
-      <HelpRequestsPage
-        route={route}
-        onNavigate={navigate}
-        user={user}
-        onLogout={onLogout}
-        loggingOut={loggingOut}
-      />
-    );
-  }
-
-  if (route.page === 'paymentFollowUps') {
-    return (
-      <PaymentFollowUpsPage
-        route={route}
-        onNavigate={navigate}
-        user={user}
-        onLogout={onLogout}
-        loggingOut={loggingOut}
-      />
-    );
-  }
-
-  if (route.page === 'paymentFollowUp' && route.caseId) {
-    return (
-      <PaymentFollowUpDetailPage
-        route={route}
-        caseId={route.caseId}
-        onNavigate={navigate}
-        user={user}
-        onLogout={onLogout}
-        loggingOut={loggingOut}
-      />
-    );
-  }
-
-  return (
-    <OverviewPage
-      route={route}
-      onNavigate={navigate}
-      user={user}
-      onLogout={onLogout}
-      loggingOut={loggingOut}
-    />
-  );
 }
 
-function parseRoute(pathname: string): AppRoute {
-  const paymentCaseMatch = pathname.match(/^\/payment-follow-ups\/(\d+)\/?$/);
-  if (paymentCaseMatch) return { page: 'paymentFollowUp', caseId: Number(paymentCaseMatch[1]) };
-  const deliveryMatch = pathname.match(/^\/deliveries\/(\d+)\/?$/);
-  if (deliveryMatch) return { page: 'delivery', jobId: Number(deliveryMatch[1]) };
-  if (/^\/deliveries\/?$/.test(pathname)) return { page: 'deliveries' };
-  if (/^\/help-requests\/?$/.test(pathname)) return { page: 'helpRequests' };
-  if (/^\/payment-follow-ups\/?$/.test(pathname)) return { page: 'paymentFollowUps' };
+const LEGACY_PATHS: Array<[RegExp, string]> = [
+  [/^\/deliveries(?=\/|$)/, '/documents'],
+  [/^\/payment-follow-ups(?=\/|$)/, '/payments'],
+  [/^\/help-requests\/?$/, '/attention'],
+  [/^\/inbox\/?$/, '/attention'],
+];
+
+function canonicalPath(pathname: string): string {
+  for (const [pattern, replacement] of LEGACY_PATHS) {
+    if (pattern.test(pathname)) return pathname.replace(pattern, replacement);
+  }
+  return pathname;
+}
+
+function parseRoute(rawPath: string): AppRoute {
+  const pathname = canonicalPath(rawPath);
+  const match = (pattern: RegExp) => pathname.match(pattern);
+  const documentMatch = match(/^\/documents\/(\d+)\/?$/);
+  if (documentMatch) return { page: 'delivery', jobId: Number(documentMatch[1]) };
+  const customerMatch = match(/^\/customers\/(\d+)\/?$/);
+  if (customerMatch) return { page: 'customer', customerId: Number(customerMatch[1]) };
+  const paymentMatch = match(/^\/payments\/(\d+)\/?$/);
+  if (paymentMatch) return { page: 'paymentFollowUp', caseId: Number(paymentMatch[1]) };
+  if (/^\/attention\/?$/.test(pathname)) return { page: 'inbox' };
+  if (/^\/documents\/?$/.test(pathname)) return { page: 'deliveries' };
+  if (/^\/customers\/?$/.test(pathname)) return { page: 'customers' };
+  if (/^\/payments\/?$/.test(pathname)) return { page: 'paymentFollowUps' };
+  if (/^\/settings\/?$/.test(pathname)) return { page: 'settings' };
   return { page: 'overview' };
 }
 
@@ -265,93 +231,92 @@ function LoginScreen({
     }
   }
 
+  const today = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date());
+
   return (
-    <main className="login-shell">
-      <section className="login-brand-panel" aria-label="SuryaDev Billing Document Delivery">
-        <div className="login-brand">
-          <img src={logoImg} alt="SuryaDev Logo" className="login-brand-logo-img" />
-          <span><strong>SuryaDev</strong><small>Billing Document Agent</small></span>
-        </div>
+    <main className="doc-login">
+      <div className="doc-login__stack">
+        <span className="doc-login__sheet doc-login__sheet--back" aria-hidden="true" />
+        <span className="doc-login__sheet doc-login__sheet--mid" aria-hidden="true" />
 
-        <div className="login-brand-content">
-          <p className="login-eyebrow">Operations workspace</p>
-          <h1>Documents delivered.<br />Every send visible.</h1>
-          <p>One secure place to monitor invoices, cancellations, credit memos and debit memos sent from SAP to WhatsApp.</p>
-          <div className="login-benefits">
-            <span><CheckCircle2 size={17} aria-hidden="true" /> Controlled test deliveries</span>
-            <span><FileText size={17} aria-hidden="true" /> Billing document and PDF audit trail</span>
-            <span><MessageCircleMore size={17} aria-hidden="true" /> WhatsApp provider visibility</span>
-          </div>
-        </div>
-
-        <p className="login-brand-footer"><ShieldCheck size={15} aria-hidden="true" /> Administrator-only workspace</p>
-      </section>
-
-      <section className="login-form-panel">
-        <div className="login-card">
-          <span className="auth-icon"><LockKeyhole size={23} aria-hidden="true" /></span>
-          <p className="eyebrow">Secure admin access</p>
-          <h2>Welcome back</h2>
-          <p className="login-card-description">Sign in to manage billing document deliveries and communication history.</p>
-
-          {error && (
-            <div className="auth-error" role="alert">
-              <AlertCircle size={17} aria-hidden="true" />
-              <span>{error}</span>
+        <section className="doc-login__card" aria-labelledby="signin-title">
+          <header className="doc-login__band">
+            <img src={logoImg} alt="SuryaDev TMT Rebar" className="doc-login__logo" />
+            <div className="doc-login__band-meta">
+              <span>Document</span>
+              <strong>Sign in</strong>
             </div>
-          )}
+          </header>
 
-          <form onSubmit={(event) => void signIn(event)}>
-            <label className="auth-field">
-              <span>Username</span>
-              <div className="auth-input-shell">
-                <UserRound size={18} aria-hidden="true" />
+          <div className="doc-login__body">
+            <div className="doc-login__heading">
+              <h1 id="signin-title">{greeting()}.</h1>
+              <span className="doc-login__date">{today}</span>
+            </div>
+            <p className="doc-login__lead">Sign in to see every invoice and memo sent to your customers on WhatsApp.</p>
+
+            {error && (
+              <div className="signin__error" role="alert">
+                <AlertCircle size={16} aria-hidden="true" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <form className="doc-login__form" onSubmit={(event) => void signIn(event)}>
+              <label className="doc-login__field">
+                <span>Username</span>
                 <input
                   type="text"
                   value={username}
                   onChange={(event) => setUsername(event.target.value)}
-                  placeholder="Enter your username"
+                  placeholder="Your username"
                   autoComplete="username"
                   autoFocus
                   required
                 />
-              </div>
-            </label>
-            <label className="auth-field">
-              <span>Password</span>
-              <div className="auth-input-shell">
-                <LockKeyhole size={18} aria-hidden="true" />
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  autoComplete="current-password"
-                  required
-                />
-                <button
-                  type="button"
-                  className="password-toggle"
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  onClick={() => setShowPassword((visible) => !visible)}
-                >
-                  {showPassword ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
-                </button>
-              </div>
-            </label>
-            <button className="button button--primary button--wide login-submit" type="submit" disabled={busy || !username || !password}>
-              <LogIn size={17} aria-hidden="true" /> {busy ? 'Signing in…' : 'Sign in'}
-            </button>
-          </form>
-
-          <div className="session-note">
-            <ShieldCheck size={17} aria-hidden="true" />
-            <span>Your session is protected by a secure, HTTP-only cookie and expires automatically.</span>
+              </label>
+              <label className="doc-login__field">
+                <span>Password</span>
+                <div className="doc-login__password">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="Your password"
+                    autoComplete="current-password"
+                    required
+                  />
+                  <button
+                    type="button"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                    onClick={() => setShowPassword((visible) => !visible)}
+                  >
+                    {showPassword ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
+                  </button>
+                </div>
+              </label>
+              <button className="doc-login__submit" type="submit" disabled={busy || !username || !password}>
+                {busy ? <><span className="signin__spinner" aria-hidden="true" /> Signing in…</> : <>Sign in <ArrowRight size={17} aria-hidden="true" /></>}
+              </button>
+            </form>
           </div>
-        </div>
-        <p className="login-product-note">SuryaDev AI Agents · Billing Documents</p>
-      </section>
+
+          <footer className="doc-login__foot">
+            <span><LockKeyhole size={12} aria-hidden="true" /> For your team only</span>
+            <span className="doc-login__ticks" aria-hidden="true">Invoices on WhatsApp <CheckCheck size={14} /></span>
+          </footer>
+        </section>
+      </div>
     </main>
   );
+}
+
+function greeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
 }
 
 function LoadingScreen() {
@@ -359,7 +324,7 @@ function LoadingScreen() {
     <main className="loading-screen">
       <span className="loading-brand">SD</span>
       <div className="spinner" />
-      <p>Checking your secure session…</p>
+      <p>Signing you in…</p>
     </main>
   );
 }

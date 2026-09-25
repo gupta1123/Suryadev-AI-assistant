@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { env, isPaymentFollowUpTestConfigured } from '../../config/env.js';
 import { HttpError } from '../../lib/http.js';
 import { getSupabaseServerClient } from '../../lib/supabase.js';
-import { persistInvoiceRecord } from '../invoice-delivery/repository.js';
+import { persistInvoiceRecord, withDisplayRecipient } from '../invoice-delivery/repository.js';
 import type { PaymentTestPreview, PaymentTestRunResult } from './domain.js';
 import {
   assertHardPaymentRecipient,
@@ -11,7 +11,7 @@ import {
   paymentReminderDelayMs,
   PAYMENT_HARD_TEST_RECIPIENT,
 } from './policy.js';
-import { maskPhone } from '../invoice-delivery/policy.js';
+import { formatPhone } from '../invoice-delivery/policy.js';
 
 const TEST_POLICY_NAME = 'Local controlled payment follow-up test';
 const TEST_STAGE_CODE = 'due_today';
@@ -736,7 +736,7 @@ export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleRe
           invoice_source: isSimulatedPaymentTest ? 'fixture' : 'sap_qas',
           receivable_source: 'test_fixture',
           actual_recipient: PAYMENT_HARD_TEST_RECIPIENT,
-          masked_recipient: maskPhone(PAYMENT_HARD_TEST_RECIPIENT),
+          masked_recipient: formatPhone(PAYMENT_HARD_TEST_RECIPIENT),
           due_date: receivable.due_date,
           outstanding_amount: outstandingAmount,
           template_name: env.MSG91_PAYMENT_TEMPLATE_NAME,
@@ -772,7 +772,7 @@ export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleRe
         invoice: invoice.sap_billing_document,
         reminder_number: reminderNumber,
         outstanding_amount: outstandingAmount,
-        masked_recipient: maskPhone(PAYMENT_HARD_TEST_RECIPIENT),
+        masked_recipient: formatPhone(PAYMENT_HARD_TEST_RECIPIENT),
       },
       metadata: {
         controlled_test: true,
@@ -1031,9 +1031,7 @@ async function requiredSingle(
 
 function sanitizeJob<T extends Record<string, unknown>>(job: T): T {
   if (!job.metadata || typeof job.metadata !== 'object') return job;
-  const metadata = { ...(job.metadata as Record<string, unknown>) };
-  delete metadata.actual_recipient;
-  return { ...job, metadata };
+  return { ...job, metadata: withDisplayRecipient(job.metadata) };
 }
 
 function errorMessage(error: unknown): string {

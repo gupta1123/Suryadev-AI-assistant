@@ -121,7 +121,7 @@ export function SendInvoiceModal({
 
   if (result) {
     return (
-      <Modal title={`${billingDocumentLabel(result.billingDocumentType)} queued`} description="The worker is sending this delivery through MSG91." onClose={onClose}>
+      <Modal title={`${billingDocumentLabel(result.billingDocumentType)} queued`} description="It’s being sent on WhatsApp now." onClose={onClose}>
         <div className="success-state">
           <span className="success-state__icon"><CheckCircle2 size={28} aria-hidden="true" /></span>
           <h3>{result.billingDocument}</h3>
@@ -141,8 +141,8 @@ export function SendInvoiceModal({
 
   return (
     <Modal
-      title="New test delivery"
-      description="Run the billing-document workflow without calling SAP. Real WhatsApp sending remains allowlisted."
+      title="Send a test"
+      description="Send a sample invoice to your test WhatsApp number. Nothing is taken from SAP."
       onClose={onClose}
       width="large"
     >
@@ -161,12 +161,12 @@ export function SendInvoiceModal({
         <div className="quick-send-layout">
           <div className="quick-send-copy">
             <span className="feature-icon"><Send size={22} aria-hidden="true" /></span>
-            <h3>Run the complete workflow</h3>
-            <p>A unique SAP-shaped billing document and matching PDF will be generated, stored, queued and sent to your fixed test number.</p>
+            <h3>Try the full flow</h3>
+            <p>We’ll make a sample document with its PDF and send it to your test number.</p>
             <div className="safety-list">
-              <span><ShieldCheck size={16} aria-hidden="true" /> No SAP calls</span>
-              <span><FileText size={16} aria-hidden="true" /> New PDF every time</span>
-              <span><MessageCircle size={16} aria-hidden="true" /> Real WhatsApp delivery</span>
+              <span><ShieldCheck size={16} aria-hidden="true" /> No SAP data used</span>
+              <span><FileText size={16} aria-hidden="true" /> Fresh PDF each time</span>
+              <span><MessageCircle size={16} aria-hidden="true" /> Sent on real WhatsApp</span>
             </div>
           </div>
 
@@ -181,9 +181,9 @@ export function SendInvoiceModal({
                 ))}
               </select>
             </label>
-            <p className="eyebrow">Destination</p>
+            <p className="eyebrow">Sent to</p>
             <strong className="mono destination-number">{config.defaultTestRecipient}</strong>
-            <p className="muted-copy">Only this backend-allowlisted number can receive the test.</p>
+            <p className="muted-copy">Tests can only go to this number.</p>
             {!config.simulationReady && (
               <ul className="blocker-list">
                 {config.simulationBlockers.map((blocker) => <li key={blocker}>{blocker}</li>)}
@@ -191,7 +191,7 @@ export function SendInvoiceModal({
             )}
             <button className="button button--primary button--wide" type="button" disabled={!config.simulationReady || busy !== null} onClick={() => void simulateInvoice()}>
               <Send size={16} aria-hidden="true" />
-              {busy === 'simulate' ? 'Creating and queueing…' : `Send sample ${billingDocumentLabel(documentType).toLowerCase()}`}
+              {busy === 'simulate' ? 'Sending…' : `Send sample ${billingDocumentLabel(documentType).toLowerCase()}`}
             </button>
           </aside>
         </div>
@@ -201,7 +201,7 @@ export function SendInvoiceModal({
             <>
               <div className="form-grid">
                 <label className="field field--full">
-                  <span>Fixture invoice</span>
+                  <span>Sample invoice</span>
                   <select value={selectedFixture} disabled={loadingFixtures} onChange={(event) => setSelectedFixture(event.target.value)}>
                     {fixtures.map((fixture) => <option key={fixture.id} value={fixture.id}>{fixture.label}</option>)}
                   </select>
@@ -214,15 +214,15 @@ export function SendInvoiceModal({
                   </div>
                 )}
                 <label className="field field--full">
-                  <span>Allowlisted WhatsApp number</span>
+                  <span>Test WhatsApp number</span>
                   <input value={recipient} onChange={(event) => setRecipient(event.target.value)} inputMode="tel" placeholder="91XXXXXXXXXX" autoComplete="off" />
-                  <small>Include the country code. All other numbers are rejected by the backend.</small>
+                  <small>Include the country code. Only approved test numbers will work.</small>
                 </label>
               </div>
               <div className="modal-footer">
                 <button className="button button--secondary" type="button" onClick={onClose}>Cancel</button>
                 <button className="button button--primary" type="button" disabled={!selectedFixture || busy !== null} onClick={() => void prepareManualDelivery()}>
-                  {busy === 'preview' ? 'Checking…' : 'Review delivery'}
+                  {busy === 'preview' ? 'Checking…' : 'Review'}
                 </button>
               </div>
             </>

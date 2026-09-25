@@ -8,7 +8,7 @@ import {
 } from '../../config/env.js';
 import { asyncHandler, HttpError } from '../../lib/http.js';
 import { type AuthenticatedRequest, requireAdmin } from '../../middleware/auth.js';
-import { maskPhone } from '../invoice-delivery/policy.js';
+import { formatPhone } from '../invoice-delivery/policy.js';
 import {
   getPaymentCase,
   listPaymentCases,
@@ -38,7 +38,7 @@ paymentFollowUpRouter.get('/config', (_request, response) => {
       testCustomer: env.PAYMENT_TEST_CUSTOMER,
       testInvoice: env.PAYMENT_TEST_INVOICE,
       testDueDate: env.PAYMENT_TEST_DUE_DATE,
-      maskedRecipient: maskPhone(paymentTestRecipient),
+      maskedRecipient: formatPhone(paymentTestRecipient),
       templateName: env.MSG91_PAYMENT_TEMPLATE_NAME,
       firstReminderDelaySeconds: env.PAYMENT_FIRST_REMINDER_DELAY_SECONDS,
       repeatReminderDelaySeconds: env.PAYMENT_REPEAT_REMINDER_DELAY_SECONDS,

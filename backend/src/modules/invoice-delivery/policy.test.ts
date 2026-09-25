@@ -5,7 +5,7 @@ import {
   buildInvoicePreview,
   createDeliveryIdempotencyKey,
   formatInvoiceAmount,
-  maskPhone,
+  formatPhone,
 } from './policy.js';
 
 describe('invoice delivery policy', () => {
@@ -18,7 +18,7 @@ describe('invoice delivery policy', () => {
     assert.equal(preview.template.variables.var_2, '0090000001');
     assert.equal(preview.template.variables.var_3, '28 Jul 2026');
     assert.equal(preview.template.variables.var_4, '12,992.00');
-    assert.equal(preview.invoice.fixtureContact, '91••••••3210');
+    assert.equal(preview.invoice.fixtureContact, '+91 98765 43210');
     assert.equal(preview.sendAllowed, false);
   });
 
@@ -30,8 +30,9 @@ describe('invoice delivery policy', () => {
     assert.equal(first.includes('919999999999'), false);
   });
 
-  it('formats and masks values without duplicating the template currency symbol', () => {
+  it('formats values without duplicating the template currency symbol', () => {
     assert.equal(formatInvoiceAmount(12992), '12,992.00');
-    assert.equal(maskPhone('919876543210'), '91••••••3210');
+    assert.equal(formatPhone('919876543210'), '+91 98765 43210');
+    assert.equal(formatPhone('14155550123'), '+14155550123');
   });
 });

@@ -1,14 +1,30 @@
-import { RefreshCw, Send } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { DeliveryTable } from '../components/DeliveryTable';
-import { PaginationControls } from '../components/PaginationControls';
-import { SendInvoiceModal } from '../components/SendInvoiceModal';
+import { DATE_RANGE_OPTIONS, FilterBar, FilterSelect, humanize, matchesSearch, withinDays } from '../components/FilterBar';
+import { PaginationControls, usePagination } from '../components/PaginationControls';
 import { apiRequest } from '../lib/api';
+import { FETCH_ALL_LIMIT, fetchAllPages } from '../lib/fetch-all';
 import { toMessage } from '../lib/format';
-import type { AdminUser, AppRoute, CursorPage, DeliveryConfig, DeliveryJob } from '../types';
+import { relationOne, type AdminUser, type AppRoute, type DeliveryConfig, type DeliveryJob } from '../types';
 
-const pageSize = 10;
+function jobStatus(job: DeliveryJob): string {
+  const status = (relationOne(job.messages)?.status ?? job.status).toLowerCase();
+  return status === 'read' ? 'delivered' : status;
+}
+
+const TYPE_TAB_LABEL: Record<string, string> = {
+  F2: 'Invoices',
+  S1: 'Cancelled invoices',
+  G2: 'Credit memos',
+  CBRE: 'Return memos',
+  L2: 'Debit memos',
+};
+
+function jobType(job: DeliveryJob): string {
+  return (relationOne(job.invoices)?.billing_document_type ?? job.metadata?.billing_document_type ?? '').toUpperCase();
+}
 
 export function DeliveriesPage({
   route,
@@ -25,26 +41,25 @@ export function DeliveriesPage({
 }) {
   const [config, setConfig] = useState<DeliveryConfig | null>(null);
   const [jobs, setJobs] = useState<DeliveryJob[]>([]);
-  const [cursor, setCursor] = useState<number | undefined>();
-  const [cursorHistory, setCursorHistory] = useState<Array<number | undefined>>([]);
-  const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const [truncated, setTruncated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
   const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('');
+  const [type, setType] = useState('');
+  const [range, setRange] = useState('');
 
   const load = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true);
     try {
-      const query = new URLSearchParams({ limit: String(pageSize), paginated: 'true' });
-      if (cursor) query.set('beforeId', String(cursor));
-      const [nextConfig, nextPage] = await Promise.all([
+      const [nextConfig, result] = await Promise.all([
         apiRequest<DeliveryConfig>('/invoice-delivery/config'),
-        apiRequest<CursorPage<DeliveryJob>>(`/invoice-delivery/jobs?${query}`),
+        fetchAllPages<DeliveryJob>('/invoice-delivery/jobs'),
       ]);
       setConfig(nextConfig);
-      setJobs(nextPage.items);
-      setNextCursor(nextPage.nextCursor);
+      setJobs(result.items);
+      setTruncated(result.truncated);
       setError('');
     } catch (loadError) {
       setError(toMessage(loadError));
@@ -52,77 +67,99 @@ export function DeliveriesPage({
       setLoading(false);
       setRefreshing(false);
     }
-  }, [cursor]);
-
-  function goToNextPage() {
-    if (nextCursor === null) return;
-    setLoading(true);
-    setCursorHistory((current) => [...current, cursor]);
-    setCursor(nextCursor);
-  }
-
-  function goToPreviousPage() {
-    if (cursorHistory.length === 0) return;
-    setLoading(true);
-    const previousCursor = cursorHistory[cursorHistory.length - 1];
-    setCursorHistory((current) => current.slice(0, -1));
-    setCursor(previousCursor);
-  }
+  }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  const statusOptions = useMemo(
+    () => [...new Set(jobs.map(jobStatus))].sort().map((value) => ({ value, label: humanize(value) })),
+    [jobs],
+  );
+  // Tabs are counted within the current search/status/date view, so the numbers always match the list.
+  const baseFiltered = useMemo(() => jobs.filter((job) => {
+    const invoice = relationOne(job.invoices);
+    return (!status || jobStatus(job) === status)
+      && withinDays(job.created_at ?? job.scheduled_at, range)
+      && matchesSearch(search, invoice?.sap_billing_document, relationOne(job.customers)?.display_name, job.metadata?.masked_recipient, job.id, `#${job.id}`);
+  }), [jobs, status, range, search]);
+  const typeTabs = [
+    { value: '', label: 'All', count: baseFiltered.length },
+    ...(config?.billingDocumentTypes ?? []).map((item) => ({
+      value: item.type,
+      label: TYPE_TAB_LABEL[item.type] ?? item.label,
+      count: baseFiltered.filter((job) => jobType(job) === item.type).length,
+    })),
+  ];
+
+  const filtered = useMemo(() => (type ? baseFiltered.filter((job) => jobType(job) === type) : baseFiltered), [baseFiltered, type]);
+
+  const filtersActive = Boolean(search || status || type || range);
+  const pagination = usePagination(filtered, 'deliveries', `${search}|${status}|${type}|${range}`);
+
+  function clearFilters() {
+    setSearch('');
+    setStatus('');
+    setType('');
+    setRange('');
+  }
+
   return (
     <AppShell
       route={route}
-      config={config}
-      eyebrow="Billing document delivery agent"
-      title="Deliveries"
+      eyebrow="Every invoice and memo sent on WhatsApp"
+      title="Documents"
       onNavigate={onNavigate}
-      onNewDelivery={config?.invoiceSource === 'sap' ? undefined : () => setModalOpen(true)}
       user={user}
       onLogout={onLogout}
       loggingOut={loggingOut}
-      actions={config?.invoiceSource !== 'sap' ? (
-        <button className="button button--primary" type="button" disabled={!config} onClick={() => setModalOpen(true)}>
-          <Send size={16} aria-hidden="true" /> New test delivery
+      actions={(
+        <button className="button button--secondary" type="button" disabled={refreshing} onClick={() => void load(true)}>
+          <RefreshCw size={15} className={refreshing ? 'spin' : ''} aria-hidden="true" /> Refresh
         </button>
-      ) : undefined}
+      )}
     >
       {error && <div className="alert alert--error">{error}</div>}
-      <section className="panel deliveries-panel">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Communication history</p>
-            <h2>All billing document deliveries</h2>
-            <p className="section-description">Invoices, cancellations, credit memos and debit memos with their complete audit trail.</p>
-          </div>
-          <button className="button button--secondary" type="button" disabled={refreshing} onClick={() => void load(true)}>
-            <RefreshCw size={15} className={refreshing ? 'spin' : ''} aria-hidden="true" /> Refresh
-          </button>
+      <section className="list-section">
+        <div className="seg-tabs" role="tablist" aria-label="Document type">
+          {typeTabs.map((tab) => (
+            <button key={tab.value || 'all'} role="tab" aria-selected={type === tab.value} className={type === tab.value ? 'seg-tab seg-tab--active' : 'seg-tab'} type="button" onClick={() => setType(tab.value)}>
+              {tab.label}<span>{tab.count}</span>
+            </button>
+          ))}
         </div>
-        {loading ? <div className="table-skeleton"><span /><span /><span /></div> : (
+        <FilterBar
+          search={search}
+          searchPlaceholder="Search by invoice, customer or phone"
+          onSearchChange={setSearch}
+          active={filtersActive}
+          onClear={clearFilters}
+        >
+          <FilterSelect label="Status" value={status} options={statusOptions} onChange={setStatus} />
+          <FilterSelect label="Date" value={range} options={DATE_RANGE_OPTIONS} onChange={setRange} />
+        </FilterBar>
+        {loading ? <div className="table-skeleton"><span /><span /><span /></div> : filtersActive && filtered.length === 0 ? (
+          <div className="empty-table">
+            <strong>Nothing matches your search</strong>
+            <p>Try a different search or <button className="text-button" type="button" onClick={clearFilters}>clear all filters</button>.</p>
+          </div>
+        ) : (
           <>
-            <DeliveryTable jobs={jobs} onOpen={(jobId) => onNavigate(`/deliveries/${jobId}`)} />
+            <DeliveryTable jobs={pagination.pageRows} onOpen={(jobId) => onNavigate(`/documents/${jobId}`)} />
             <PaginationControls
-              page={cursorHistory.length + 1}
-              itemCount={jobs.length}
-              pageSize={pageSize}
-              hasPrevious={cursorHistory.length > 0}
-              hasNext={nextCursor !== null}
+              page={pagination.page}
+              pageCount={pagination.pageCount}
+              pageSize={pagination.pageSize}
+              total={pagination.total}
+              noun="documents"
               disabled={refreshing}
-              onPrevious={goToPreviousPage}
-              onNext={goToNextPage}
+              onPageChange={pagination.setPage}
+              onPageSizeChange={pagination.setPageSize}
             />
+            {truncated && <p className="list-cap-note">Showing the latest {FETCH_ALL_LIMIT} documents.</p>}
           </>
         )}
       </section>
 
-      {modalOpen && config?.invoiceSource === 'fixture' && (
-        <SendInvoiceModal
-          config={config}
-          onClose={() => setModalOpen(false)}
-          onComplete={(jobId) => { setModalOpen(false); onNavigate(`/deliveries/${jobId}`); }}
-        />
-      )}
     </AppShell>
   );
 }

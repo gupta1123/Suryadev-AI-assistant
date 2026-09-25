@@ -56,14 +56,14 @@ export function buildInvoicePreview(
       billingDocumentDate: candidate.billingDocumentDate,
       customerName: candidate.customer.displayName,
       customerNumber: candidate.customer.customerNumber,
-      fixtureContact: maskPhone(candidate.contact.normalizedValue),
+      fixtureContact: formatPhone(candidate.contact.normalizedValue),
       currency: candidate.currency,
       totalGrossAmount: candidate.totalGrossAmount,
       itemCount: candidate.items.length,
       pdfFileName: candidate.pdf.fileName,
     },
     actualRecipient: recipient,
-    maskedRecipient: maskPhone(recipient),
+    maskedRecipient: formatPhone(recipient),
     template: {
       name: documentDefinition?.templateName ?? env.MSG91_TEMPLATE_NAME,
       language: env.MSG91_TEMPLATE_LANGUAGE,
@@ -108,9 +108,14 @@ export function formatInvoiceDate(value: string): string {
   }).format(new Date(`${value}T00:00:00Z`));
 }
 
-export function maskPhone(value: string): string {
-  if (value.length < 5) return value ? '••••' : '';
-  return `${value.slice(0, 2)}••••••${value.slice(-4)}`;
+/** Formats a stored phone number for display in full, e.g. 919876543210 → +91 98765 43210. */
+export function formatPhone(value: string): string {
+  const digits = value.replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.length === 12 && digits.startsWith('91')) {
+    return `+91 ${digits.slice(2, 7)} ${digits.slice(7)}`;
+  }
+  return `+${digits}`;
 }
 
 function validation(

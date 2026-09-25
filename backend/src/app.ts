@@ -5,6 +5,7 @@ import { pinoHttp } from 'pino-http';
 import { env } from './config/env.js';
 import { errorHandler } from './lib/http.js';
 import { authRouter } from './modules/auth/routes.js';
+import { customersRouter } from './modules/customers/routes.js';
 import { invoiceDeliveryRouter } from './modules/invoice-delivery/routes.js';
 import { msg91WebhookRouter } from './modules/invoice-delivery/webhook.js';
 import { paymentFollowUpRouter } from './modules/payment-follow-up/routes.js';
@@ -40,6 +41,7 @@ app.use('/api/health', healthRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/invoice-delivery', invoiceDeliveryRouter);
 app.use('/api/payment-follow-up', paymentFollowUpRouter);
+app.use('/api/customers', customersRouter);
 app.use('/api/webhooks/msg91', msg91WebhookRouter);
 
 app.use((_request, response) => {

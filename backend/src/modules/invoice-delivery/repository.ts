@@ -4,7 +4,7 @@ import { env } from '../../config/env.js';
 import { HttpError } from '../../lib/http.js';
 import { getSupabaseServerClient } from '../../lib/supabase.js';
 import type { InvoiceCandidate, PersistedDelivery } from './domain.js';
-import { createDeliveryIdempotencyKey, maskPhone } from './policy.js';
+import { createDeliveryIdempotencyKey, formatPhone } from './policy.js';
 import { getBillingDocumentDefinition } from './document-policy.js';
 
 export type PersistedInvoice = {
@@ -109,7 +109,7 @@ export async function persistInvoiceAndEnqueue(
           source: options.source,
           source_id: candidate.fixtureId,
           actual_recipient: recipient,
-          masked_recipient: maskPhone(recipient),
+          masked_recipient: formatPhone(recipient),
           document_id: persisted.documentId,
           document_path: persisted.documentPath,
           billing_document_type: documentDefinition.type,
@@ -193,7 +193,7 @@ export async function listDeliveryJobsPage(
   let query = client
     .from('communication_jobs')
     .select(
-      'id,job_type,status,attempt_count,max_attempts,scheduled_at,completed_at,last_error,metadata,customers(display_name),invoices!communication_jobs_primary_invoice_id_fkey(sap_billing_document,billing_document_type,billing_document_date,transaction_currency,total_gross_amount),messages(id,status,provider_message_id,sent_at,delivered_at,read_at,failed_at)',
+      'id,job_type,status,attempt_count,max_attempts,scheduled_at,completed_at,created_at,customer_id,primary_invoice_id,last_error,metadata,customers(id,display_name,sap_customer_number),invoices!communication_jobs_primary_invoice_id_fkey(sap_billing_document,billing_document_type,billing_document_date,transaction_currency,total_gross_amount),messages(id,status,provider_message_id,sent_at,delivered_at,read_at,failed_at)',
     )
     .in('job_type', ['invoice_delivery', 'manual_resend'])
     .order('id', { ascending: false })
@@ -307,8 +307,24 @@ export async function getDeliveryJob(jobId: number): Promise<Record<string, unkn
     }),
   );
 
+  // Link the delivery to the payment follow-up for the same invoice, if one exists,
+  // so the document page can show reminders and payment status in one place.
+  const paymentCaseResult = job.primary_invoice_id
+    ? await client
+      .from('payment_follow_up_cases')
+      .select('id')
+      .eq('invoice_id', Number(job.primary_invoice_id))
+      .order('id', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    : { data: null, error: null };
+  if (paymentCaseResult.error) {
+    throw new HttpError(500, 'Unable to load payment follow-up', paymentCaseResult.error.message);
+  }
+
   return {
     ...sanitizeJobForApi(job),
+    payment_case_id: paymentCaseResult.data ? Number(paymentCaseResult.data.id) : null,
     agent_run: agentRunResult.data,
     invoice_items: itemsResult.data ?? [],
     invoice_documents: documents,
@@ -1328,16 +1344,19 @@ function statusRank(status: string): number {
 }
 
 function sanitizeJobForApi<T extends Record<string, unknown>>(job: T): T {
-  const metadata = isRecord(job.metadata) ? { ...job.metadata } : {};
+  return { ...job, metadata: withDisplayRecipient(job.metadata) };
+}
+
+/**
+ * Older jobs stored only a masked copy of the number for display. Rebuild the display
+ * value from the real recipient so the dashboard always shows the full number.
+ */
+export function withDisplayRecipient(value: unknown): Record<string, unknown> {
+  const metadata = isRecord(value) ? { ...value } : {};
+  const actual = typeof metadata.actual_recipient === 'string' ? metadata.actual_recipient : '';
+  if (actual) metadata.masked_recipient = formatPhone(actual);
   delete metadata.actual_recipient;
-  const customerContact = isRecord(job.customer_contacts)
-    ? { ...job.customer_contacts, original_value: '[redacted]', normalized_value: '[redacted]' }
-    : job.customer_contacts;
-  return {
-    ...job,
-    metadata,
-    ...(customerContact ? { customer_contacts: customerContact } : {}),
-  };
+  return metadata;
 }
 
 async function requiredSingle(

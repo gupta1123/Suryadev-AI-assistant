@@ -5,11 +5,12 @@ import {
   ChevronRight,
   RefreshCw,
   Send,
-  ShieldCheck,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../components/AppShell';
+import { FilterBar, FilterSelect, humanize, matchesSearch } from '../components/FilterBar';
 import { Modal } from '../components/Modal';
+import { PaginationControls, usePagination } from '../components/PaginationControls';
 import { StatusBadge } from '../components/StatusBadge';
 import { apiRequest } from '../lib/api';
 import { formatCurrency, formatDate, formatDateTime, toMessage } from '../lib/format';
@@ -17,7 +18,6 @@ import {
   relationOne,
   type AdminUser,
   type AppRoute,
-  type DeliveryConfig,
   type PaymentFollowUpCase,
   type PaymentFollowUpConfig,
   type PaymentTestPreview,
@@ -37,23 +37,23 @@ export function PaymentFollowUpsPage({
   onLogout: () => Promise<void>;
   loggingOut: boolean;
 }) {
-  const [deliveryConfig, setDeliveryConfig] = useState<DeliveryConfig | null>(null);
   const [paymentConfig, setPaymentConfig] = useState<PaymentFollowUpConfig | null>(null);
   const [cases, setCases] = useState<PaymentFollowUpCase[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
   const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+  const [reminder, setReminder] = useState('');
+  const [paymentStatus, setPaymentStatus] = useState('');
+  const [bucket, setBucket] = useState<Bucket>('open');
 
   const load = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true);
     try {
-      const [nextDeliveryConfig, nextPaymentConfig, nextCases] = await Promise.all([
-        apiRequest<DeliveryConfig>('/invoice-delivery/config'),
+      const [nextPaymentConfig, nextCases] = await Promise.all([
         apiRequest<PaymentFollowUpConfig>('/payment-follow-up/config'),
         apiRequest<PaymentFollowUpCase[]>('/payment-follow-up/cases'),
       ]);
-      setDeliveryConfig(nextDeliveryConfig);
       setPaymentConfig(nextPaymentConfig);
       setCases(nextCases);
       setError('');
@@ -67,67 +67,127 @@ export function PaymentFollowUpsPage({
 
   useEffect(() => { void load(); }, [load]);
 
+  const reminderOptions = useMemo(
+    () => [...new Set(cases.map(reminderStatus))].sort().map((value) => ({ value, label: humanize(value) })),
+    [cases],
+  );
+  const paymentStatusOptions = useMemo(
+    () => [...new Set(cases.map((item) => item.receivable?.payment_status).filter((value): value is string => Boolean(value)))]
+      .sort().map((value) => ({ value, label: humanize(value) })),
+    [cases],
+  );
+  const searched = useMemo(() => cases.filter((item) =>
+    (!reminder || reminderStatus(item) === reminder)
+    && (!paymentStatus || item.receivable?.payment_status === paymentStatus)
+    && matchesSearch(search, item.customer?.display_name, item.customer?.sap_customer_number, item.invoice?.sap_billing_document)),
+  [cases, reminder, paymentStatus, search]);
+  const bucketCounts = useMemo(() => Object.fromEntries(BUCKETS.map(({ key }) => [key, searched.filter((item) => inBucket(item, key)).length])) as Record<Bucket, number>, [searched]);
+  const filtered = useMemo(() => searched.filter((item) => inBucket(item, bucket)), [searched, bucket]);
+  const totalDue = filtered.reduce((sum, item) => sum + (isSettled(item) ? 0 : Number(item.receivable?.outstanding_amount ?? 0)), 0);
+  const dueCurrency = filtered.find((item) => item.receivable)?.receivable?.currency ?? 'INR';
+  const filtersActive = Boolean(search || reminder || paymentStatus);
+  const pagination = usePagination(filtered, 'payment-cases', `${search}|${reminder}|${paymentStatus}|${bucket}`);
+
+  function clearFilters() {
+    setSearch('');
+    setReminder('');
+    setPaymentStatus('');
+  }
+
   return (
     <AppShell
       route={route}
-      config={deliveryConfig}
-      eyebrow="Payment follow-up agent"
-      title="Payment follow-ups"
+      eyebrow="Unpaid invoices and their reminders"
+      title="Payments"
       onNavigate={onNavigate}
       user={user}
       onLogout={onLogout}
       loggingOut={loggingOut}
       actions={(
-        <button
-          className="button button--primary"
-          type="button"
-          disabled={!paymentConfig?.configured}
-          onClick={() => setModalOpen(true)}
-        >
-          <Send size={16} aria-hidden="true" /> Run controlled test
+        <button className="button button--secondary" type="button" disabled={refreshing} onClick={() => void load(true)}>
+          <RefreshCw size={15} className={refreshing ? 'spin' : ''} aria-hidden="true" /> Refresh
         </button>
       )}
     >
       {error && <div className="alert alert--error">{error}</div>}
 
-      <section className="payment-safety-banner">
-        <span><ShieldCheck size={20} aria-hidden="true" /></span>
-        <div>
-          <strong>Controlled test deployment</strong>
-          <p>
-            Locked to {paymentConfig?.maskedRecipient || 'the approved test number'}. The invoice is sent first. After WhatsApp reports that invoice as sent, the first payment reminder is scheduled after {paymentConfig?.firstReminderDelaySeconds ?? 120} seconds and the next after {paymentConfig?.repeatReminderDelaySeconds ?? 20} seconds. The agent checks payment status before every reminder and stops after {paymentConfig?.maximumTestReminders ?? 2} reminders.
-          </p>
+      <section className="list-section">
+        <div className="seg-tabs" role="tablist" aria-label="How late">
+          {BUCKETS.map(({ key, label }) => (
+            <button key={key} role="tab" aria-selected={bucket === key} className={bucket === key ? 'seg-tab seg-tab--active' : 'seg-tab'} type="button" onClick={() => setBucket(key)}>
+              {key !== 'open' && key !== 'paid' && <i className={`seg-tab__dot seg-tab__dot--age-${key}`} />}
+              {label}<span>{bucketCounts[key]}</span>
+            </button>
+          ))}
         </div>
-        <em>{paymentConfig?.deploymentAllowed ? 'Safety lock active' : 'Disabled'}</em>
-      </section>
-
-      <section className="panel deliveries-panel">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Receivables</p>
-            <h2>Payment cases</h2>
-            <p className="section-description">Amounts due, reminder status and the next follow-up date.</p>
+        {!loading && totalDue > 0 && (
+          <p className="list-summary"><strong>{formatCurrency(totalDue, dueCurrency)}</strong> still to pay across {filtered.filter((item) => !isSettled(item)).length} invoices</p>
+        )}
+        <FilterBar
+          search={search}
+          searchPlaceholder="Search customer or invoice"
+          onSearchChange={setSearch}
+          active={filtersActive}
+          onClear={clearFilters}
+        >
+          <FilterSelect label="Reminder" value={reminder} options={reminderOptions} onChange={setReminder} />
+          <FilterSelect label="Payment" value={paymentStatus} options={paymentStatusOptions} onChange={setPaymentStatus} />
+        </FilterBar>
+        {loading ? <div className="table-skeleton"><span /><span /><span /></div> : cases.length > 0 && filtered.length === 0 ? (
+          <div className="empty-table">
+            <strong>{filtersActive ? 'Nothing matches your search' : 'Nothing in this group'}</strong>
+            <p>{filtersActive ? <>Try a different search or <button className="text-button" type="button" onClick={clearFilters}>clear all filters</button>.</> : 'Pick another tab to see other invoices.'}</p>
           </div>
-          <button className="button button--secondary" type="button" disabled={refreshing} onClick={() => void load(true)}>
-            <RefreshCw size={15} className={refreshing ? 'spin' : ''} aria-hidden="true" /> Refresh
-          </button>
-        </div>
-        {loading ? <div className="table-skeleton"><span /><span /><span /></div> : (
-          <PaymentCasesTable cases={cases} onOpen={(caseId) => onNavigate(`/payment-follow-ups/${caseId}`)} />
+        ) : (
+          <>
+            <PaymentCasesTable cases={pagination.pageRows} onOpen={(caseId) => onNavigate(`/payments/${caseId}`)} />
+            <PaginationControls
+              page={pagination.page}
+              pageCount={pagination.pageCount}
+              pageSize={pagination.pageSize}
+              total={pagination.total}
+              noun="invoices"
+              disabled={refreshing}
+              onPageChange={pagination.setPage}
+              onPageSizeChange={pagination.setPageSize}
+            />
+          </>
         )}
       </section>
 
-      {modalOpen && (
-        <PaymentTestModal
-          onClose={() => setModalOpen(false)}
-          onComplete={(result) => {
-            setModalOpen(false);
-            onNavigate(`/payment-follow-ups/${result.caseId}`);
-          }}
-        />
-      )}
     </AppShell>
   );
+}
+
+type Bucket = 'open' | 'current' | 'late30' | 'late60' | 'late60plus' | 'paid';
+
+const BUCKETS: Array<{ key: Bucket; label: string }> = [
+  { key: 'open', label: 'All unpaid' },
+  { key: 'current', label: 'Not yet due' },
+  { key: 'late30', label: '1–30 days late' },
+  { key: 'late60', label: '31–60 days late' },
+  { key: 'late60plus', label: '60+ days late' },
+  { key: 'paid', label: 'Paid' },
+];
+
+function isSettled(paymentCase: PaymentFollowUpCase): boolean {
+  return Boolean(paymentCase.resolved_at) || (paymentCase.receivable ? Number(paymentCase.receivable.outstanding_amount) <= 0 : false);
+}
+
+function inBucket(paymentCase: PaymentFollowUpCase, bucket: Bucket): boolean {
+  const settled = isSettled(paymentCase);
+  if (bucket === 'paid') return settled;
+  if (settled) return false;
+  const days = paymentCase.receivable?.days_overdue ?? 0;
+  if (bucket === 'current') return days <= 0;
+  if (bucket === 'late30') return days >= 1 && days <= 30;
+  if (bucket === 'late60') return days >= 31 && days <= 60;
+  if (bucket === 'late60plus') return days > 60;
+  return true;
+}
+
+function reminderStatus(paymentCase: PaymentFollowUpCase): string {
+  return relationOne(paymentCase.latestJob?.messages)?.status ?? paymentCase.latestJob?.status ?? paymentCase.status;
 }
 
 function PaymentCasesTable({
@@ -141,19 +201,18 @@ function PaymentCasesTable({
     return (
       <div className="empty-table">
         <BadgeIndianRupee size={28} aria-hidden="true" />
-        <strong>No payment cases yet</strong>
-        <p>Run the controlled test when you are ready.</p>
+        <strong>No unpaid invoices yet</strong>
+        <p>Invoices show up here when they’re waiting to be paid. You can send a test reminder from Settings.</p>
       </div>
     );
   }
   return (
     <div className="table-scroll">
       <table>
-        <thead><tr><th>Customer</th><th>Invoice</th><th>Outstanding</th><th>Due date</th><th>Reminder</th><th aria-label="Open" /></tr></thead>
+        <thead><tr><th>Customer</th><th>Invoice</th><th>Amount due</th><th>Due date</th><th>Last reminder</th><th aria-label="Open" /></tr></thead>
         <tbody>
           {cases.map((paymentCase) => {
-            const message = relationOne(paymentCase.latestJob?.messages);
-            const status = message?.status ?? paymentCase.latestJob?.status ?? paymentCase.status;
+            const status = reminderStatus(paymentCase);
             return (
               <tr key={paymentCase.id}>
                 <td><strong>{paymentCase.customer?.display_name ?? 'Customer unavailable'}</strong><small>{paymentCase.customer?.sap_customer_number ?? '—'}</small></td>
@@ -171,7 +230,7 @@ function PaymentCasesTable({
   );
 }
 
-function PaymentTestModal({
+export function PaymentTestModal({
   onClose,
   onComplete,
 }: {
@@ -208,8 +267,8 @@ function PaymentTestModal({
 
   return (
     <Modal
-      title="Run invoice-to-payment test"
-      description="Review the exact SAP invoice and recipient. The test sends the invoice first, then schedules two payment reminders from the successful invoice send."
+      title="Send a test reminder"
+      description="We’ll send the invoice first, then two payment reminders. Check the details below before sending."
       onClose={onClose}
       width="large"
     >
@@ -224,7 +283,7 @@ function PaymentTestModal({
               <div><span>Amount due</span><strong>{formatCurrency(preview.receivable.outstandingAmount, preview.receivable.currency)}</strong></div>
               <div><span>Due date</span><strong>{formatDate(preview.receivable.dueDate)}</strong></div>
               <div><span>WhatsApp</span><strong>{preview.maskedRecipient}</strong></div>
-              <div><span>Source</span><strong>SAP QAS + test payment status</strong></div>
+              <div><span>Source</span><strong>Test data</strong></div>
             </div>
             <div className="whatsapp-message payment-message-preview">
               <small>Message preview</small>
@@ -244,7 +303,7 @@ function PaymentTestModal({
           <div className="modal-footer">
             <button className="button button--secondary" type="button" onClick={onClose}>Cancel</button>
             <button className="button button--primary" type="button" disabled={!preview.sendAllowed || sending} onClick={() => void send()}>
-              <Send size={15} aria-hidden="true" /> {sending ? 'Starting test…' : 'Send invoice and start test'}
+              <Send size={15} aria-hidden="true" /> {sending ? 'Sending…' : 'Send test'}
             </button>
           </div>
         </>

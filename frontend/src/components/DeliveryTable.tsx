@@ -15,8 +15,8 @@ export function DeliveryTable({
   if (jobs.length === 0) {
     return (
       <div className="empty-table">
-        <strong>No billing document deliveries yet</strong>
-        <p>Your first delivery will appear here with its complete history.</p>
+        <strong>Nothing sent yet</strong>
+        <p>Documents you send will show up here.</p>
       </div>
     );
   }
@@ -25,7 +25,7 @@ export function DeliveryTable({
     <div className="table-scroll">
       <table className="delivery-table">
         <thead>
-          <tr><th>Document</th><th>Type</th><th>Customer</th><th>Destination</th><th>Status</th><th>Created</th><th><span className="sr-only">Open</span></th></tr>
+          <tr><th>Document</th><th>Type</th><th>Customer</th><th>Sent to</th><th>Status</th><th>Date</th><th><span className="sr-only">Open</span></th></tr>
         </thead>
         <tbody>
           {jobs.map((job) => {
@@ -34,7 +34,7 @@ export function DeliveryTable({
             const message = relationOne(job.messages);
             return (
               <tr key={job.id}>
-                <td><strong className="invoice-number">{invoice?.sap_billing_document ?? `Job #${job.id}`}</strong><small>Job #{job.id}</small></td>
+                <td><strong className="invoice-number">{invoice?.sap_billing_document ?? `Document #${job.id}`}</strong></td>
                 <td><span className="document-type-code">{invoice?.billing_document_type ?? job.metadata?.billing_document_type ?? '—'}</span><small>{billingDocumentLabel(invoice?.billing_document_type ?? job.metadata?.billing_document_type)}</small></td>
                 <td>{customer?.display_name ?? '—'}</td>
                 <td className="mono">{job.metadata?.masked_recipient ?? '—'}</td>

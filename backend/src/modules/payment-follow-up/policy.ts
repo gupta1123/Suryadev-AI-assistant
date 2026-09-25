@@ -10,7 +10,7 @@ import {
   whatsappTestRecipients,
 } from '../../config/env.js';
 import type { InvoiceCandidate, ValidationResult } from '../invoice-delivery/domain.js';
-import { formatInvoiceAmount, formatInvoiceDate, maskPhone } from '../invoice-delivery/policy.js';
+import { formatInvoiceAmount, formatInvoiceDate, formatPhone } from '../invoice-delivery/policy.js';
 import type { AgingBucket, PaymentTestPreview, TestReceivable } from './domain.js';
 
 // This is intentionally resolved from the deployed environment instead of being
@@ -126,7 +126,7 @@ export function buildSimulatedPaymentPreview(
     candidate,
     receivable,
     recipient,
-    maskedRecipient: maskPhone(recipient),
+    maskedRecipient: formatPhone(recipient),
     template: {
       name: env.MSG91_PAYMENT_TEMPLATE_NAME,
       language: env.MSG91_PAYMENT_TEMPLATE_LANGUAGE,
@@ -177,7 +177,7 @@ export function buildPaymentPreview(
     candidate,
     receivable,
     recipient,
-    maskedRecipient: maskPhone(recipient),
+    maskedRecipient: formatPhone(recipient),
     template: {
       name: env.MSG91_PAYMENT_TEMPLATE_NAME,
       language: env.MSG91_PAYMENT_TEMPLATE_LANGUAGE,

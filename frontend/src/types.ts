@@ -187,6 +187,7 @@ export type InvoiceSummary = {
 
 export type DeliveryJob = {
   id: number;
+  customer_id?: number;
   status: string;
   channel?: string;
   source_version?: number;
@@ -214,6 +215,7 @@ export type DeliveryJob = {
 };
 
 export type DeliveryJobDetail = Omit<DeliveryJob, 'messages'> & {
+  payment_case_id?: number | null;
   messages?: DeliveryMessage[];
   agent_run?: {
     id: number;
@@ -459,11 +461,81 @@ export type PaymentTestRunResult = {
 
 export type AppRoute =
   | { page: 'overview' }
+  | { page: 'inbox' }
   | { page: 'deliveries' }
   | { page: 'delivery'; jobId: number }
-  | { page: 'helpRequests' }
+  | { page: 'customers' }
+  | { page: 'customer'; customerId: number }
   | { page: 'paymentFollowUps' }
-  | { page: 'paymentFollowUp'; caseId: number };
+  | { page: 'paymentFollowUp'; caseId: number }
+  | { page: 'settings' };
+
+export type CustomerContact = {
+  id: number;
+  channel: string;
+  label: string | null;
+  phone: string;
+  isPrimary: boolean;
+  isVerified: boolean;
+  isWhatsappCapable: boolean | null;
+  consentStatus: string;
+  doNotContact: boolean;
+  isActive: boolean;
+  validationError: string | null;
+};
+
+export type CustomerSummaryRow = {
+  id: number;
+  sapCustomerNumber: string | null;
+  name: string;
+  legalName: string | null;
+  isActive: boolean;
+  whatsapp: CustomerContact | null;
+  documentsSent: number;
+  failedDocuments: number;
+  lastDocumentAt: string | null;
+  amountDue: number;
+  overdueAmount: number;
+  currency: string;
+};
+
+export type CustomerDetail = {
+  id: number;
+  sapCustomerNumber: string | null;
+  sapBusinessPartnerId: string | null;
+  name: string;
+  legalName: string | null;
+  languageCode: string | null;
+  countryCode: string | null;
+  isActive: boolean;
+  lastSyncedAt: string | null;
+  contacts: CustomerContact[];
+  documents: Array<{
+    jobId: number;
+    document: string | null;
+    type: string | null;
+    documentDate: string | null;
+    amount: number | null;
+    currency: string;
+    status: string;
+    sentAt: string | null;
+    createdAt: string | null;
+    failureReason: string | null;
+  }>;
+  payments: Array<{
+    caseId: number | null;
+    invoice: string;
+    invoiceDate: string | null;
+    currency: string;
+    originalAmount: number;
+    outstandingAmount: number;
+    dueDate: string | null;
+    daysOverdue: number;
+    paymentStatus: string | null;
+    nextReminderAt: string | null;
+    resolved: boolean;
+  }>;
+};
 
 export function relationOne<T>(value: T | T[] | undefined): T | undefined {
   return Array.isArray(value) ? value[0] : value;

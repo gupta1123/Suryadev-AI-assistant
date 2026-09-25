@@ -20,7 +20,7 @@ import {
   requireAdmin,
 } from '../../middleware/auth.js';
 import { getInvoiceSource } from './invoice-source.js';
-import { buildInvoicePreview, maskPhone } from './policy.js';
+import { buildInvoicePreview, formatPhone } from './policy.js';
 import {
   getBillingDocumentDefinition,
   SUPPORTED_BILLING_DOCUMENT_TYPES,
@@ -106,8 +106,8 @@ invoiceDeliveryRouter.get('/config', (_request, response) => {
           templateName: definition.templateName,
         };
       }),
-      testRecipients: [...whatsappTestRecipients].map(maskPhone),
-      defaultTestRecipient: maskPhone(defaultWhatsappTestRecipient),
+      testRecipients: [...whatsappTestRecipients].map(formatPhone),
+      defaultTestRecipient: formatPhone(defaultWhatsappTestRecipient),
       simulationReady: simulationBlockers.length === 0,
       simulationBlockers,
       sapConfigured: isSapConfigured,
