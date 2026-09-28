@@ -42,6 +42,7 @@ export function SendInvoiceModal({
   const [selectedFixture, setSelectedFixture] = useState('');
   const [recipient, setRecipient] = useState('');
   const [documentType, setDocumentType] = useState<'F2' | 'S1' | 'CBRE' | 'G2' | 'L2'>('F2');
+  const [sampleRecipient, setSampleRecipient] = useState(config.defaultTestRecipient);
   const [preview, setPreview] = useState<InvoicePreview | null>(null);
   const [result, setResult] = useState<SimulationResult | null>(null);
   const [loadingFixtures, setLoadingFixtures] = useState(false);
@@ -72,7 +73,7 @@ export function SendInvoiceModal({
       setResult(
         await apiRequest<SimulationResult>('/invoice-delivery/simulate', {
           method: 'POST',
-          body: JSON.stringify({ documentType }),
+          body: JSON.stringify({ documentType, recipient: sampleRecipient.replace(/\D/g, '') }),
         }),
       );
     } catch (simulationError) {
@@ -181,9 +182,15 @@ export function SendInvoiceModal({
                 ))}
               </select>
             </label>
-            <p className="eyebrow">Sent to</p>
-            <strong className="mono destination-number">{config.defaultTestRecipient}</strong>
-            <p className="muted-copy">Tests can only go to this number.</p>
+            <label className="field">
+              <span>Sent to</span>
+              <select className="mono" value={sampleRecipient} onChange={(event) => setSampleRecipient(event.target.value)}>
+                {config.testRecipients.map((testRecipient) => (
+                  <option key={testRecipient} value={testRecipient}>{testRecipient}</option>
+                ))}
+              </select>
+            </label>
+            <p className="muted-copy">Tests can only go to approved test numbers.</p>
             {!config.simulationReady && (
               <ul className="blocker-list">
                 {config.simulationBlockers.map((blocker) => <li key={blocker}>{blocker}</li>)}

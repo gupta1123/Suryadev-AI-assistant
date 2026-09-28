@@ -341,13 +341,22 @@ export type PaymentFollowUpConfig = {
   receivableSource: 'test_fixture' | 'sap';
   testCustomer: string;
   testInvoice: string;
-  testDueDate?: string;
   maskedRecipient: string;
   templateName: string;
   firstReminderDelaySeconds: number;
   repeatReminderDelaySeconds: number;
   maximumTestReminders: number;
+  reminderSettingsSource: 'saved' | 'server_default';
+  reminderSettingsUpdatedAt: string | null;
   deploymentAllowed: boolean;
+};
+
+export type ReminderSettings = {
+  firstReminderDelaySeconds: number;
+  repeatReminderDelaySeconds: number;
+  maximumReminders: number;
+  source: 'saved' | 'server_default';
+  updatedAt: string | null;
 };
 
 export type PaymentTestPreview = {
@@ -441,9 +450,18 @@ export type PaymentFollowUpCase = {
     aging_bucket: string;
     days_overdue: number;
     last_synced_at: string;
+    raw_data?: {
+      payment_confirmation?: {
+        source: string;
+        marked_by?: string | null;
+        confirmed_at: string;
+      };
+    };
   } | null;
   latestJob: PaymentReminderJob | null;
   jobs?: PaymentReminderJob[];
+  restartable?: boolean;
+  whatsappNumber?: string | null;
 };
 
 export type PaymentTestRunResult = {
@@ -531,6 +549,7 @@ export type CustomerDetail = {
     outstandingAmount: number;
     dueDate: string | null;
     daysOverdue: number;
+    agingBucket: string | null;
     paymentStatus: string | null;
     nextReminderAt: string | null;
     resolved: boolean;

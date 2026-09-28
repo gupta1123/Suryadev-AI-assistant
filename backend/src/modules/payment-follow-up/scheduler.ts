@@ -3,6 +3,7 @@ import {
   enqueueNextDuePaymentReminder,
   preparePaymentTestSchedule,
 } from './repository.js';
+import { getReminderSettings } from './settings.js';
 import { processPaymentFollowUpQueue } from './worker.js';
 
 let timer: NodeJS.Timeout | undefined;
@@ -54,8 +55,9 @@ async function initializeScheduler(): Promise<void> {
     if (!env.PAYMENT_SIMULATION_AUTO_FOLLOW_UP) {
       await preparePaymentTestSchedule();
     }
+    const reminderSettings = await getReminderSettings();
     console.log(
-      `Controlled payment scheduler ready: first reminder after ${env.PAYMENT_FIRST_REMINDER_DELAY_SECONDS}s, repeats after ${env.PAYMENT_REPEAT_REMINDER_DELAY_SECONDS}s, ${env.PAYMENT_TEST_MAX_REMINDERS} reminder cap`,
+      `Controlled payment scheduler ready: first reminder after ${reminderSettings.firstReminderDelaySeconds}s, repeats after ${reminderSettings.repeatReminderDelaySeconds}s, ${reminderSettings.maximumReminders} reminder cap`,
     );
     await runPaymentFollowUpSchedule();
   } catch (error) {

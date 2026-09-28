@@ -55,6 +55,7 @@ const previewSchema = z.object({
 
 const simulationSchema = z.object({
   documentType: z.enum(SUPPORTED_BILLING_DOCUMENT_TYPES).default('F2'),
+  recipient: z.string().optional(),
 });
 
 const listSchema = z.object({
@@ -187,14 +188,18 @@ invoiceDeliveryRouter.post(
       );
     }
 
+    const recipient = input.recipient?.replace(/\D/g, '') || defaultWhatsappTestRecipient;
+    if (!whatsappTestRecipients.has(recipient)) {
+      throw new HttpError(400, 'Sample documents can only be sent to an approved test number');
+    }
     const candidate = await simulator.create(
       new Date(),
-      defaultWhatsappTestRecipient,
+      recipient,
       input.documentType,
     );
     const preview = await buildApprovedInvoicePreview(
       candidate,
-      defaultWhatsappTestRecipient,
+      recipient,
     );
     if (!preview.sendAllowed) {
       throw new HttpError(

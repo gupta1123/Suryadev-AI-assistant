@@ -1,6 +1,7 @@
 import {
   digitsOnly,
   env,
+  isAllowedPaymentRecipient,
   isPaymentFollowUpTestConfigured,
 } from '../../config/env.js';
 import { getDeliveryJobContextById } from '../invoice-delivery/repository.js';
@@ -11,10 +12,7 @@ import {
   scheduleNextPaymentReminderFromSentAt,
 } from './repository.js';
 import { getPaymentTestPreview } from './service.js';
-import {
-  automaticPaymentCycleId,
-  PAYMENT_HARD_TEST_RECIPIENT,
-} from './policy.js';
+import { automaticPaymentCycleId } from './policy.js';
 
 export async function handOffSentInvoiceToPaymentSchedule(
   jobId: number,
@@ -25,13 +23,10 @@ export async function handOffSentInvoiceToPaymentSchedule(
 
   if (context.job_type === 'payment_reminder') {
     const cycleId = String(context.metadata.payment_test_cycle_id ?? '');
-    const isSimulatedPaymentTest = context.metadata.payment_simulation_test === true;
     if (
       !cycleId ||
       !context.payment_follow_up_case_id ||
-      recipient !== PAYMENT_HARD_TEST_RECIPIENT ||
-      (!isSimulatedPaymentTest &&
-        context.invoice.sap_billing_document !== env.PAYMENT_TEST_INVOICE)
+      !isAllowedPaymentRecipient(recipient)
     ) {
       return;
     }
@@ -58,7 +53,7 @@ export async function handOffSentInvoiceToPaymentSchedule(
       (!isSimulatedInvoiceDelivery && !isPaymentFollowUpTestConfigured) ||
       (isSimulatedInvoiceDelivery && !env.PAYMENT_SIMULATION_AUTO_FOLLOW_UP) ||
       !env.PAYMENT_FOLLOW_UP_SEND_ENABLED ||
-      recipient !== PAYMENT_HARD_TEST_RECIPIENT ||
+      !isAllowedPaymentRecipient(recipient) ||
       (!isSimulatedInvoiceDelivery &&
         context.invoice.sap_billing_document !== env.PAYMENT_TEST_INVOICE)
     ) {
@@ -71,7 +66,7 @@ export async function handOffSentInvoiceToPaymentSchedule(
     : isAutomaticInvoiceDelivery
     ? automaticPaymentCycleId(context.id)
     : String(context.metadata.payment_test_cycle_id ?? '');
-  if (!cycleId || recipient !== PAYMENT_HARD_TEST_RECIPIENT) {
+  if (!cycleId || !isAllowedPaymentRecipient(recipient)) {
     throw new Error('Invoice-to-payment handoff failed its controlled test boundary');
   }
 

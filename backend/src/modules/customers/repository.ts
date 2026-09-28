@@ -1,6 +1,7 @@
 import { HttpError } from '../../lib/http.js';
 import { getSupabaseServerClient } from '../../lib/supabase.js';
 import { formatPhone } from '../invoice-delivery/policy.js';
+import { withCurrentAging } from '../payment-follow-up/policy.js';
 
 const CUSTOMER_LIMIT = 500;
 
@@ -53,7 +54,7 @@ export async function listCustomers() {
       .in('customer_id', ids),
     client
       .from('invoices')
-      .select('sold_to_customer_id,invoice_receivables(outstanding_amount,currency,days_overdue)')
+      .select('sold_to_customer_id,invoice_receivables(outstanding_amount,currency,due_date)')
       .in('sold_to_customer_id', ids),
   ]);
   const firstError = contactsResult.error ?? jobsResult.error ?? receivablesResult.error;
@@ -66,7 +67,9 @@ export async function listCustomers() {
   return customers.map((customer) => {
     const id = Number(customer.id);
     const jobs = jobsBy.get(id) ?? [];
-    const receivables = (invoicesBy.get(id) ?? []).flatMap((invoice) => asArray(invoice.invoice_receivables));
+    const receivables = (invoicesBy.get(id) ?? [])
+      .flatMap((invoice) => asArray(invoice.invoice_receivables))
+      .map((row) => withCurrentAging(row));
     const failed = jobs.filter((job) => messageStatus(job) === 'failed').length;
     return {
       id,
@@ -112,7 +115,7 @@ export async function getCustomer(customerId: number) {
       .limit(200),
     client
       .from('invoices')
-      .select('id,sap_billing_document,billing_document_date,transaction_currency,total_gross_amount,invoice_receivables(outstanding_amount,paid_amount,currency,due_date,payment_status,days_overdue),payment_follow_up_cases(id,status,next_action_at,last_reminder_at,resolved_at)')
+      .select('id,sap_billing_document,billing_document_date,transaction_currency,total_gross_amount,invoice_receivables(outstanding_amount,paid_amount,currency,due_date,payment_status),payment_follow_up_cases(id,status,next_action_at,last_reminder_at,resolved_at)')
       .eq('sold_to_customer_id', customerId)
       .order('billing_document_date', { ascending: false })
       .limit(200),
@@ -121,7 +124,8 @@ export async function getCustomer(customerId: number) {
   if (firstError) throw new HttpError(500, 'Unable to load customer history', firstError.message);
 
   const payments = (casesResult.data ?? []).flatMap((invoice) => {
-    const receivable = asArray(invoice.invoice_receivables)[0];
+    const storedReceivable = asArray(invoice.invoice_receivables)[0];
+    const receivable = storedReceivable ? withCurrentAging(storedReceivable) : undefined;
     const paymentCase = asArray(invoice.payment_follow_up_cases)[0];
     if (!receivable && !paymentCase) return [];
     return [{
@@ -132,7 +136,8 @@ export async function getCustomer(customerId: number) {
       originalAmount: Number(invoice.total_gross_amount ?? 0),
       outstandingAmount: Number(receivable?.outstanding_amount ?? 0),
       dueDate: receivable?.due_date ?? null,
-      daysOverdue: Number(receivable?.days_overdue ?? 0),
+      daysOverdue: receivable?.days_overdue ?? 0,
+      agingBucket: receivable?.aging_bucket ?? null,
       paymentStatus: receivable?.payment_status ?? null,
       nextReminderAt: paymentCase?.next_action_at ?? null,
       resolved: Boolean(paymentCase?.resolved_at),

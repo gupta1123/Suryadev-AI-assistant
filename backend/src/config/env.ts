@@ -52,9 +52,9 @@ const envSchema = z.object({
   PAYMENT_SIMULATION_AUTO_FOLLOW_UP: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   PAYMENT_RECEIVABLE_SOURCE: z.enum(['test_fixture', 'sap']).default('test_fixture'),
   PAYMENT_TEST_RECIPIENT: z.string().default(''),
+  PAYMENT_TEST_RECIPIENTS: z.string().default(''),
   PAYMENT_TEST_CUSTOMER: z.string().default(''),
   PAYMENT_TEST_INVOICE: z.string().default(''),
-  PAYMENT_TEST_DUE_DATE: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   PAYMENT_TEST_OUTSTANDING_AMOUNT: z.coerce.number().positive().optional(),
   MSG91_PAYMENT_TEMPLATE_NAME: z.string().min(1).default('payment_reminder_v1'),
   MSG91_PAYMENT_TEMPLATE_LANGUAGE: z.string().min(1).default('en'),
@@ -156,7 +156,17 @@ export const isSapPollingConfigured = Boolean(
     (env.DELIVERY_MODE !== 'test' || isSapTestBoundaryConfigured()),
 );
 
-export const paymentTestRecipient = digitsOnly(env.PAYMENT_TEST_RECIPIENT);
+// Payment reminders may go to any number listed here, and each one must also be
+// on the WhatsApp test allowlist. PAYMENT_TEST_RECIPIENT is the older single-number form.
+export const paymentTestRecipients = new Set(
+  [...env.PAYMENT_TEST_RECIPIENTS.split(','), env.PAYMENT_TEST_RECIPIENT]
+    .map(digitsOnly)
+    .filter((recipient) => recipient && whatsappTestRecipients.has(recipient)),
+);
+
+export function isAllowedPaymentRecipient(recipient: string): boolean {
+  return Boolean(recipient) && paymentTestRecipients.has(recipient);
+}
 
 export const isPaymentFollowUpRuntimeAllowed = Boolean(
   env.NODE_ENV !== 'production' || env.PAYMENT_TEST_DEPLOYMENT_ENABLED,
@@ -169,8 +179,7 @@ export const isPaymentFollowUpTestConfigured = Boolean(
     env.PAYMENT_RECEIVABLE_SOURCE === 'test_fixture' &&
     env.PAYMENT_TEST_CUSTOMER &&
     env.PAYMENT_TEST_INVOICE &&
-    env.PAYMENT_TEST_DUE_DATE &&
-    paymentTestRecipient,
+    paymentTestRecipients.size > 0,
 );
 
 export const isPaymentFollowUpSchedulerConfigured = Boolean(
@@ -178,6 +187,6 @@ export const isPaymentFollowUpSchedulerConfigured = Boolean(
     env.DELIVERY_MODE === 'test' &&
     env.PAYMENT_FOLLOW_UP_ENABLED &&
     env.PAYMENT_RECEIVABLE_SOURCE === 'test_fixture' &&
-    paymentTestRecipient &&
+    paymentTestRecipients.size > 0 &&
     (env.PAYMENT_SIMULATION_AUTO_FOLLOW_UP || isPaymentFollowUpTestConfigured),
 );

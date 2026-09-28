@@ -137,7 +137,7 @@ export function CustomerDetailPage({
                           </span>
                           <span className="ds-list__end">
                             <strong>{formatCurrency(payment.outstandingAmount, payment.currency)}</strong>
-                            <small className={payment.daysOverdue > 0 ? 'text-danger' : ''}>{payment.daysOverdue > 0 ? `${payment.daysOverdue} ${payment.daysOverdue === 1 ? 'day' : 'days'} late` : 'Not yet due'}</small>
+                            <small className={payment.daysOverdue > 0 ? 'text-danger' : ''}>{payment.daysOverdue > 0 ? `${payment.daysOverdue} ${payment.daysOverdue === 1 ? 'day' : 'days'} late` : payment.agingBucket === 'due' ? 'Due today' : 'Not yet due'}</small>
                           </span>
                           <ChevronRight size={16} aria-hidden="true" className="ds-list__chevron" />
                         </button>

@@ -15,8 +15,12 @@ import {
   markDeliveryFailed,
   startMessageAttempt,
 } from '../invoice-delivery/repository.js';
-import { assertHardPaymentRecipient } from './policy.js';
-import { markPaymentReminderAwaitingSent } from './repository.js';
+import { assertAllowedPaymentRecipient } from './policy.js';
+import {
+  isPaymentCaseResolved,
+  markPaymentReminderAwaitingSent,
+  skipResolvedPaymentReminderJob,
+} from './repository.js';
 
 let timer: NodeJS.Timeout | undefined;
 let running = false;
@@ -66,9 +70,13 @@ async function processClaimedPaymentJob(
   }
   const context = await getDeliveryJobContext(job);
   const recipient = digitsOnly(String(context.metadata.actual_recipient ?? ''));
-  assertHardPaymentRecipient(recipient);
+  assertAllowedPaymentRecipient(recipient);
   if (!context.payment_follow_up_case_id) {
     throw new Error('Payment reminder job has no follow-up case');
+  }
+  if (await isPaymentCaseResolved(context.payment_follow_up_case_id)) {
+    await skipResolvedPaymentReminderJob(context.id);
+    return;
   }
   const outstandingAmount = Number(context.metadata.outstanding_amount);
   const cycleId = String(context.metadata.payment_test_cycle_id ?? '');

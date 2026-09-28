@@ -46,6 +46,7 @@ export function PaymentFollowUpsPage({
   const [reminder, setReminder] = useState('');
   const [paymentStatus, setPaymentStatus] = useState('');
   const [bucket, setBucket] = useState<Bucket>('open');
+  const [demoOpen, setDemoOpen] = useState(false);
 
   const load = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true);
@@ -104,9 +105,20 @@ export function PaymentFollowUpsPage({
       onLogout={onLogout}
       loggingOut={loggingOut}
       actions={(
-        <button className="button button--secondary" type="button" disabled={refreshing} onClick={() => void load(true)}>
-          <RefreshCw size={15} className={refreshing ? 'spin' : ''} aria-hidden="true" /> Refresh
-        </button>
+        <>
+          <button className="button button--secondary" type="button" disabled={refreshing} onClick={() => void load(true)}>
+            <RefreshCw size={15} className={refreshing ? 'spin' : ''} aria-hidden="true" /> Refresh
+          </button>
+          <button
+            className="button button--primary"
+            type="button"
+            disabled={!paymentConfig?.configured}
+            title={paymentConfig?.configured ? undefined : 'Payment reminders are not set up on the server'}
+            onClick={() => setDemoOpen(true)}
+          >
+            <Send size={15} aria-hidden="true" /> Start demo reminder
+          </button>
+        </>
       )}
     >
       {error && <div className="alert alert--error">{error}</div>}
@@ -155,15 +167,23 @@ export function PaymentFollowUpsPage({
         )}
       </section>
 
+      {demoOpen && paymentConfig && (
+        <PaymentTestModal
+          maximumReminders={paymentConfig.maximumTestReminders}
+          onClose={() => setDemoOpen(false)}
+          onComplete={(result) => { setDemoOpen(false); onNavigate(`/payments/${result.caseId}`); }}
+        />
+      )}
     </AppShell>
   );
 }
 
-type Bucket = 'open' | 'current' | 'late30' | 'late60' | 'late60plus' | 'paid';
+type Bucket = 'open' | 'current' | 'due' | 'late30' | 'late60' | 'late60plus' | 'paid';
 
 const BUCKETS: Array<{ key: Bucket; label: string }> = [
   { key: 'open', label: 'All unpaid' },
   { key: 'current', label: 'Not yet due' },
+  { key: 'due', label: 'Due today' },
   { key: 'late30', label: '1–30 days late' },
   { key: 'late60', label: '31–60 days late' },
   { key: 'late60plus', label: '60+ days late' },
@@ -179,11 +199,21 @@ function inBucket(paymentCase: PaymentFollowUpCase, bucket: Bucket): boolean {
   if (bucket === 'paid') return settled;
   if (settled) return false;
   const days = paymentCase.receivable?.days_overdue ?? 0;
-  if (bucket === 'current') return days <= 0;
+  const dueToday = paymentCase.receivable?.aging_bucket === 'due';
+  if (bucket === 'current') return days <= 0 && !dueToday;
+  if (bucket === 'due') return dueToday;
   if (bucket === 'late30') return days >= 1 && days <= 30;
   if (bucket === 'late60') return days >= 31 && days <= 60;
   if (bucket === 'late60plus') return days > 60;
   return true;
+}
+
+function latenessLabel(paymentCase: PaymentFollowUpCase): string {
+  if (isSettled(paymentCase)) return 'Paid';
+  if (!paymentCase.receivable) return '—';
+  if (paymentCase.receivable.aging_bucket === 'due') return 'Due today';
+  const days = paymentCase.receivable.days_overdue;
+  return days > 0 ? `${days} ${days === 1 ? 'day' : 'days'} late` : 'Not yet due';
 }
 
 function reminderStatus(paymentCase: PaymentFollowUpCase): string {
@@ -202,7 +232,7 @@ function PaymentCasesTable({
       <div className="empty-table">
         <BadgeIndianRupee size={28} aria-hidden="true" />
         <strong>No unpaid invoices yet</strong>
-        <p>Invoices show up here when they’re waiting to be paid. You can send a test reminder from Settings.</p>
+        <p>Invoices show up here when they’re waiting to be paid.</p>
       </div>
     );
   }
@@ -218,7 +248,7 @@ function PaymentCasesTable({
                 <td><strong>{paymentCase.customer?.display_name ?? 'Customer unavailable'}</strong><small>{paymentCase.customer?.sap_customer_number ?? '—'}</small></td>
                 <td><span className="invoice-number">{paymentCase.invoice?.sap_billing_document ?? '—'}</span><small>{formatDate(paymentCase.invoice?.billing_document_date)}</small></td>
                 <td><strong>{formatCurrency(Number(paymentCase.receivable?.outstanding_amount ?? 0), paymentCase.receivable?.currency)}</strong><small>{paymentCase.receivable?.payment_status.replaceAll('_', ' ') ?? '—'}</small></td>
-                <td>{formatDate(paymentCase.receivable?.due_date)}<small>{paymentCase.receivable?.aging_bucket ?? '—'}</small></td>
+                <td>{formatDate(paymentCase.receivable?.due_date)}<small>{latenessLabel(paymentCase)}</small></td>
                 <td><StatusBadge status={status} /><small>{formatDateTime(paymentCase.last_reminder_at)}</small></td>
                 <td><button className="row-open-button" type="button" onClick={() => onOpen(paymentCase.id)} aria-label="Open payment case"><ChevronRight size={16} /></button></td>
               </tr>
@@ -231,9 +261,11 @@ function PaymentCasesTable({
 }
 
 export function PaymentTestModal({
+  maximumReminders,
   onClose,
   onComplete,
 }: {
+  maximumReminders: number;
   onClose: () => void;
   onComplete: (result: PaymentTestRunResult) => void;
 }) {
@@ -268,7 +300,7 @@ export function PaymentTestModal({
   return (
     <Modal
       title="Send a test reminder"
-      description="We’ll send the invoice first, then two payment reminders. Check the details below before sending."
+      description={`We’ll send the invoice first, then up to ${maximumReminders} payment ${maximumReminders === 1 ? 'reminder' : 'reminders'} on the timing set in Settings. Check the details below before sending.`}
       onClose={onClose}
       width="large"
     >
