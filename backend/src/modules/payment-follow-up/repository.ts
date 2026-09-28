@@ -835,6 +835,51 @@ export async function skipResolvedPaymentReminderJob(jobId: number): Promise<voi
   if (error) throw new Error(`Unable to skip the payment reminder: ${error.message}`);
 }
 
+// A reminder's "sent" status can be applied by any backend sharing this
+// database, including one that does not schedule this case. If a delivered
+// reminder never got its follow-up scheduled, schedule it here.
+export async function repairStalledPaymentSchedules(now = new Date()): Promise<number[]> {
+  const client = getSupabaseServerClient();
+  const { data: cases, error } = await client
+    .from('payment_follow_up_cases')
+    .select('id,invoice_id,last_reminder_at')
+    .eq('status', 'paused')
+    .is('next_action_at', null);
+  if (error) throw new Error(`Unable to check paused payment cases: ${error.message}`);
+  const repaired: number[] = [];
+  const recentCutoff = now.getTime() - 24 * 60 * 60 * 1000;
+  for (const paymentCase of cases ?? []) {
+    const { data: receivable } = await client
+      .from('invoice_receivables')
+      .select('raw_data')
+      .eq('invoice_id', paymentCase.invoice_id)
+      .maybeSingle();
+    const rawData = receivable && isRecord(receivable.raw_data) ? receivable.raw_data : {};
+    const cycleId = typeof rawData.payment_test_cycle_id === 'string' ? rawData.payment_test_cycle_id : '';
+    if (!cycleId || !isAllowedPaymentRecipient(String(rawData.approved_recipient ?? ''))) continue;
+
+    const { data: job } = await client
+      .from('communication_jobs')
+      .select('id,status,messages(sent_at)')
+      .eq('job_type', 'payment_reminder')
+      .eq('payment_follow_up_case_id', paymentCase.id)
+      .contains('metadata', { payment_test_cycle_id: cycleId })
+      .order('id', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const message = Array.isArray(job?.messages) ? job.messages[0] : job?.messages;
+    const sentAt = message?.sent_at ? String(message.sent_at) : '';
+    if (!job || job.status !== 'completed' || !sentAt) continue;
+    const sentTime = Date.parse(sentAt);
+    const lastReminderTime = paymentCase.last_reminder_at ? Date.parse(String(paymentCase.last_reminder_at)) : Number.NaN;
+    if (sentTime < recentCutoff || (Number.isFinite(lastReminderTime) && lastReminderTime >= sentTime)) continue;
+
+    const result = await scheduleNextPaymentReminderFromSentAt(Number(paymentCase.id), cycleId, Number(job.id), sentAt);
+    if (!result.duplicate) repaired.push(Number(paymentCase.id));
+  }
+  return repaired;
+}
+
 export async function preparePaymentTestSchedule(): Promise<void> {
   assertLocalPaymentSchedulerBoundary();
   const client = getSupabaseServerClient();

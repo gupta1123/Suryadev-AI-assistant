@@ -2,6 +2,7 @@ import { env, isPaymentFollowUpSchedulerConfigured } from '../../config/env.js';
 import {
   enqueueNextDuePaymentReminder,
   preparePaymentTestSchedule,
+  repairStalledPaymentSchedules,
 } from './repository.js';
 import { getReminderSettings } from './settings.js';
 import { processPaymentFollowUpQueue } from './worker.js';
@@ -34,6 +35,10 @@ export async function runPaymentFollowUpSchedule(): Promise<void> {
   if (running || !isPaymentFollowUpSchedulerConfigured || !env.PAYMENT_FOLLOW_UP_SEND_ENABLED) return;
   running = true;
   try {
+    const repaired = await repairStalledPaymentSchedules();
+    if (repaired.length) {
+      console.log(`Rescheduled payment reminders that were missed after delivery: cases ${repaired.join(', ')}`);
+    }
     const result = await enqueueNextDuePaymentReminder();
     if (result.enqueued) {
       console.log(`Controlled payment reminder ${result.jobId} queued after receivable status recheck`);
