@@ -33,10 +33,12 @@ describe('payment reminder settings', () => {
     assert.equal(parseStoredReminderSettings(stored).source, 'server_default');
   });
 
-  it('rejects timings outside 1 minute to 30 days and more than 10 reminders', () => {
+  it('rejects timings outside 10 seconds to 30 days and more than 10 reminders', () => {
     const valid = { firstReminderDelaySeconds: 120, repeatReminderDelaySeconds: 180, maximumReminders: 2 };
     assert.ok(reminderSettingsSchema.safeParse(valid).success);
-    assert.equal(reminderSettingsSchema.safeParse({ ...valid, firstReminderDelaySeconds: 59 }).success, false);
+    assert.ok(reminderSettingsSchema.safeParse({ ...valid, firstReminderDelaySeconds: 15 }).success);
+    assert.equal(reminderSettingsSchema.safeParse({ ...valid, firstReminderDelaySeconds: 9 }).success, false);
+    assert.equal(reminderSettingsSchema.safeParse({ ...valid, repeatReminderDelaySeconds: 9 }).success, false);
     assert.equal(reminderSettingsSchema.safeParse({ ...valid, repeatReminderDelaySeconds: 31 * 86_400 }).success, false);
     assert.equal(reminderSettingsSchema.safeParse({ ...valid, maximumReminders: 11 }).success, false);
     assert.equal(reminderSettingsSchema.safeParse({ ...valid, maximumReminders: 1.5 }).success, false);

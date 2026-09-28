@@ -253,12 +253,16 @@ function SettingsSection({ id, title, description, action, children }: { id: str
   );
 }
 
-type TimeUnit = 'minutes' | 'hours' | 'days';
-const UNIT_SECONDS: Record<TimeUnit, number> = { minutes: 60, hours: 3600, days: 86_400 };
+type TimeUnit = 'seconds' | 'minutes' | 'hours' | 'days';
+const UNIT_SECONDS: Record<TimeUnit, number> = { seconds: 1, minutes: 60, hours: 3600, days: 86_400 };
+const MIN_DELAY_SECONDS = 10;
 const MAX_DELAY_SECONDS = 30 * 86_400;
 
 function splitDuration(seconds: number): { amount: string; unit: TimeUnit } {
-  const unit: TimeUnit = seconds % UNIT_SECONDS.days === 0 ? 'days' : seconds % UNIT_SECONDS.hours === 0 ? 'hours' : 'minutes';
+  const unit: TimeUnit = seconds % UNIT_SECONDS.days === 0 ? 'days'
+    : seconds % UNIT_SECONDS.hours === 0 ? 'hours'
+      : seconds % UNIT_SECONDS.minutes === 0 ? 'minutes'
+        : 'seconds';
   return { amount: String(Math.max(1, Math.round(seconds / UNIT_SECONDS[unit]))), unit };
 }
 
@@ -287,8 +291,8 @@ function ReminderTimingForm({ config, onSaved }: { config: PaymentFollowUpConfig
   const repeatSeconds = Number(repeat.amount) * UNIT_SECONDS[repeat.unit];
   const maximumCount = Number(maximum);
   const problem =
-    !Number.isInteger(firstSeconds) || firstSeconds < 60 || firstSeconds > MAX_DELAY_SECONDS ? 'The first reminder must be between 1 minute and 30 days.'
-      : !Number.isInteger(repeatSeconds) || repeatSeconds < 60 || repeatSeconds > MAX_DELAY_SECONDS ? 'The time between reminders must be between 1 minute and 30 days.'
+    !Number.isInteger(firstSeconds) || firstSeconds < MIN_DELAY_SECONDS || firstSeconds > MAX_DELAY_SECONDS ? 'The first reminder must be between 10 seconds and 30 days.'
+      : !Number.isInteger(repeatSeconds) || repeatSeconds < MIN_DELAY_SECONDS || repeatSeconds > MAX_DELAY_SECONDS ? 'The time between reminders must be between 10 seconds and 30 days.'
         : !Number.isInteger(maximumCount) || maximumCount < 1 || maximumCount > 10 ? 'Send between 1 and 10 reminders.'
           : '';
   const changed =
@@ -378,6 +382,7 @@ function DurationField({
       <div className="set-timing__pair">
         <input type="number" min={1} step={1} inputMode="numeric" disabled={disabled} value={value.amount} onChange={(event) => onChange({ ...value, amount: event.target.value })} aria-label={`${label} amount`} />
         <select disabled={disabled} value={value.unit} onChange={(event) => onChange({ ...value, unit: event.target.value as TimeUnit })} aria-label={`${label} unit`}>
+          <option value="seconds">seconds</option>
           <option value="minutes">minutes</option>
           <option value="hours">hours</option>
           <option value="days">days</option>

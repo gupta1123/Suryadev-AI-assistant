@@ -5,12 +5,13 @@ import { getSupabaseServerClient } from '../../lib/supabase.js';
 // Admins edit reminder timing from Settings. The values live in the single
 // system_settings row under settings.payment_reminders; anything not saved there
 // falls back to the server environment.
+const MIN_DELAY_SECONDS = 10;
 const MAX_DELAY_SECONDS = 30 * 86_400;
 const CACHE_MS = 10_000;
 
 export const reminderSettingsSchema = z.object({
-  firstReminderDelaySeconds: z.coerce.number().int().min(60).max(MAX_DELAY_SECONDS),
-  repeatReminderDelaySeconds: z.coerce.number().int().min(60).max(MAX_DELAY_SECONDS),
+  firstReminderDelaySeconds: z.coerce.number().int().min(MIN_DELAY_SECONDS).max(MAX_DELAY_SECONDS),
+  repeatReminderDelaySeconds: z.coerce.number().int().min(MIN_DELAY_SECONDS).max(MAX_DELAY_SECONDS),
   maximumReminders: z.coerce.number().int().min(1).max(10),
 });
 
