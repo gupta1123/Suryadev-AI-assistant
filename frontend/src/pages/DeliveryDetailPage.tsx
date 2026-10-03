@@ -1,18 +1,8 @@
-import {
-  AlertCircle,
-  Check,
-  CheckCheck,
-  Clock3,
-  Download,
-  ExternalLink,
-  FileText,
-  RefreshCw,
-  RotateCcw,
-} from 'lucide-react';
+import { AlertCircle, Download, ExternalLink, FileText, RefreshCw, RotateCcw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { BackLink } from '../components/BackLink';
-import { StatusBadge } from '../components/StatusBadge';
+import { Amount, Bubble, Journey, PhoneFrame, StatementRow, formatTime, rise, type JourneyItem, type PageTone } from '../components/statement';
 import { apiRequest } from '../lib/api';
 import {
   billingDocumentAmountLabel,
@@ -127,8 +117,13 @@ export function DeliveryDetailPage({
   const currency = invoice?.transaction_currency ?? 'INR';
   const who = customer?.display_name ?? 'The customer';
   const summary = job ? summarize(stage, who, documentLabel.toLowerCase(), job.metadata?.masked_recipient, message, job.created_at) : { title: '', detail: '' };
-  const journey = job ? journeySteps(job, message, stage, paymentCase) : [];
   const nextStep = job ? nextStepText(stage, paymentCase) : null;
+
+  const tone: PageTone = stage === 'failed' ? 'critical' : stage === 'read' || stage === 'delivered' ? 'paid' : 'calm';
+  const pill = ({ read: 'Read by customer', delivered: 'Delivered', sent: 'Sent', failed: 'Not delivered', queued: 'Getting ready' } as Record<Stage, string>)[stage];
+  const journeyItems = job ? journeyList(job, message, stage, failureReason, paymentCase, () => paymentCase && onNavigate(`/payments/${paymentCase.id}`)) : [];
+  const explainer = documentType ? TYPE_EXPLAINER[documentType.toUpperCase()] : undefined;
+  const sentAt = message?.sent_at ?? null;
 
   return (
     <AppShell
@@ -142,85 +137,50 @@ export function DeliveryDetailPage({
       user={user}
       onLogout={onLogout}
       loggingOut={loggingOut}
-      actions={(
-        <>
-          <button className="button button--secondary" type="button" disabled={refreshing} onClick={() => void load(true)}>
-            <RefreshCw size={15} className={refreshing ? 'spin' : ''} aria-hidden="true" /> Refresh
-          </button>
-          {document?.download_url && (
-            <a className="button button--primary" href={document.download_url} target="_blank" rel="noreferrer">
-              <Download size={16} aria-hidden="true" /> Download PDF
-            </a>
-          )}
-        </>
-      )}
     >
       {error && <div className="alert alert--error">{error}</div>}
 
       {loading || !job ? (
         <div className="detail-skeleton"><span /><div><span /><span /></div></div>
       ) : (
-        <div className="ds">
-          <section className={`ds-summary ds-summary--${stage}`} aria-label="Summary">
-            <span className="ds-summary__icon"><StageIcon stage={stage} size={22} /></span>
-            <div className="ds-summary__text">
-              <span className="ds-kind">{documentLabel}{invoice?.sap_billing_document ? ` ${invoice.sap_billing_document}` : ''}</span>
-              <h2>{summary.title}</h2>
-              <p>{summary.detail}</p>
-              {nextStep && <p className="ds-next"><strong>Next:</strong> {nextStep}</p>}
-            </div>
-            <div className="ds-summary__side">
-              <span className="ds-amount">{amount !== undefined ? formatCurrency(Number(amount), currency) : '—'}</span>
-              <small>{billingDocumentAmountLabel(documentType)}</small>
-              <div className="ds-summary__actions">
-                {stage === 'failed' && (
-                  <button className="button button--primary" type="button" disabled={retrying} onClick={() => void retry()}>
+        <div className="pf pf--stack" data-tone={tone}>
+          <div className="pf-top">
+            <header className="pf-hero pf-rise" style={rise(0)}>
+              <span className="pf-pill"><i aria-hidden="true" />{pill}</span>
+              <p className="pf-hero__label">{billingDocumentAmountLabel(documentType)}</p>
+              <Amount value={Number(amount ?? 0)} currency={currency} available={amount !== undefined} />
+              <p className="pf-hero__headline">{summary.title}</p>
+              {stage === 'failed' && (
+                <>
+                  <p className="pf-hero__detail"><span>{failureReason ?? 'No reason was given.'}</span></p>
+                  {nextStep && <p className="pf-hero__detail"><span className="pf-hero__next"><AlertCircle size={13} aria-hidden="true" /> {nextStep}</span></p>}
+                </>
+              )}
+              <div className="pf-actions">
+                {stage === 'failed' ? (
+                  <button className="pf-btn pf-btn--solid" type="button" disabled={retrying} onClick={() => void retry()}>
                     <RotateCcw size={15} aria-hidden="true" /> {retrying ? 'Trying again…' : 'Try again'}
                   </button>
-                )}
+                ) : document?.download_url ? (
+                  <a className="pf-btn pf-btn--solid" href={document.download_url} target="_blank" rel="noreferrer">
+                    <Download size={16} aria-hidden="true" /> Download PDF
+                  </a>
+                ) : null}
                 {document?.preview_url && (
-                  <button className={`button ${stage === 'failed' ? 'button--secondary' : 'button--primary'}`} type="button" onClick={() => setShowPdf((open) => !open)}>
+                  <button className="pf-btn pf-btn--ghost" type="button" onClick={() => setShowPdf((open) => !open)}>
                     <FileText size={15} aria-hidden="true" /> {showPdf ? 'Hide PDF' : 'View PDF'}
                   </button>
                 )}
+                <button className="pf-btn pf-btn--ghost" type="button" disabled={refreshing} onClick={() => void load(true)}>
+                  <RefreshCw size={15} className={refreshing ? 'spin' : ''} aria-hidden="true" /> Refresh
+                </button>
               </div>
-            </div>
-          </section>
-
-          <ol className="ds-steps" aria-label="Journey">
-            {journey.map((step) => (
-              <li key={step.key} className={`ds-step ds-step--${step.state}${step.key === 'read' ? ' ds-step--read' : ''}`}>
-                <span className="ds-step__dot">
-                  {step.state === 'done' ? <Check size={12} strokeWidth={3} /> : step.state === 'failed' ? <AlertCircle size={13} strokeWidth={2.6} /> : null}
-                </span>
-                <strong>{step.label}</strong>
-                <small>{step.time ? formatDateTime(step.time) : step.note ?? (step.state === 'current' ? 'Waiting…' : step.state === 'failed' ? 'Stopped' : '—')}</small>
-              </li>
-            ))}
-          </ol>
-          {stage === 'failed' && <p className="ds-reason"><AlertCircle size={15} aria-hidden="true" /> <span><strong>Why it failed:</strong> {failureReason ?? 'No reason was given.'}</span></p>}
-
-          {showPdf && document?.preview_url && (
-            <section className="ds-pdf" aria-label={`${documentLabel} PDF`}>
-              <header>
-                <strong>{document.file_name ?? `${documentLabel}.pdf`}</strong>
-                <span>
-                  <a className="dt-link" href={document.preview_url} target="_blank" rel="noreferrer">Open in new tab <ExternalLink size={13} aria-hidden="true" /></a>
-                  {document.download_url && <a className="dt-link" href={document.download_url} target="_blank" rel="noreferrer">Download <Download size={13} aria-hidden="true" /></a>}
-                </span>
-              </header>
-              <iframe src={`${document.preview_url}#toolbar=1&navpanes=0&view=FitH`} title={`${documentLabel} ${invoice?.sap_billing_document ?? jobId}`} />
-            </section>
-          )}
-
-          <div className="ds-grid">
-            <section className="ds-card" aria-label="What the customer received">
-              <header className="ds-card__head">
-                <h3>What {customer?.display_name ?? 'the customer'} received</h3>
-                <span>On WhatsApp</span>
-              </header>
-              <div className="dt-chat">
-                <div className="dt-bubble">
+            </header>
+            <PhoneFrame name={who} subtitle={job.metadata?.masked_recipient} badge={documentLabel} style={rise(2)}>
+            <section className="pf-day" aria-label="Message">
+              <h4>{formatDate(message?.sent_at ?? job.created_at)}</h4>
+              <div className="pf-turn">
+                <Bubble tone={stage} time={formatTime(message?.sent_at ?? job.created_at)}>
                   {document && (
                     <div className="dt-attachment">
                       <span className="dt-attachment__icon"><FileText size={18} aria-hidden="true" /></span>
@@ -247,46 +207,75 @@ export function DeliveryDetailPage({
                   </p>
                   <p>{billingDocumentAttachmentMessage(documentType)}</p>
                   <p>Thank you,<br />{billingDocumentSignature(documentType, variables.var_5 ?? 'SuryaDev')}</p>
-                  <span className="dt-bubble__meta">
-                    {formatTime(message?.sent_at ?? job.created_at)}
-                    <MessageTicks stage={stage} />
-                  </span>
-                </div>
+                </Bubble>
+                {stage === 'failed' && <p className="pf-notice"><AlertCircle size={12} aria-hidden="true" /> {failureReason ?? 'No reason was given.'}</p>}
               </div>
             </section>
-
-            <div className="ds-side">
-              <section className="ds-card" aria-label="About this document">
-                <header className="ds-card__head"><h3>About this document</h3></header>
-                {documentType && TYPE_EXPLAINER[documentType.toUpperCase()] && (
-                  <p className="ds-explainer"><span className="document-type-code">{documentType}</span> {TYPE_EXPLAINER[documentType.toUpperCase()]}</p>
-                )}
-                <dl className="ds-facts">
-                  <div><dt>Customer</dt><dd>{customer?.id ? <button className="dt-inline-link" type="button" onClick={() => onNavigate(`/customers/${customer.id}`)}>{customer.display_name}</button> : (customer?.display_name ?? '—')}</dd></div>
-                  <div><dt>Sent to</dt><dd className="mono">{job.metadata?.masked_recipient ?? '—'}</dd></div>
-                  <div><dt>Document number</dt><dd>{invoice?.sap_billing_document ?? '—'}</dd></div>
-                  <div><dt>Document date</dt><dd>{formatDate(invoice?.billing_document_date)}</dd></div>
-                  <div><dt>{billingDocumentAmountLabel(documentType)}</dt><dd>{amount !== undefined ? formatCurrency(Number(amount), currency) : '—'}</dd></div>
-                </dl>
-              </section>
-
-              {paymentCase && <PaymentPanel paymentCase={paymentCase} onOpen={() => onNavigate(`/payments/${paymentCase.id}`)} />}
-            </div>
+          </PhoneFrame>
           </div>
 
-          <details className="ds-tech">
-            <summary>Technical details</summary>
-            <dl className="dt-details dt-details--stacked">
-              <div><dt>Reference</dt><dd>#{job.id}</dd></div>
-              <div><dt>Customer code</dt><dd>{customer?.sap_customer_number ?? '—'}</dd></div>
-              <div><dt>Message format</dt><dd className="mono">{job.communication_templates?.name ?? job.metadata?.template_name ?? '—'}</dd></div>
-              <div><dt>WhatsApp message ID</dt><dd className="mono">{message?.provider_message_id ?? '—'}</dd></div>
-              <div><dt>Send attempts</dt><dd>{attempts.length} of {job.max_attempts}</dd></div>
-              <div><dt>Delivered</dt><dd>{formatDateTime(message?.delivered_at)}</dd></div>
-              <div><dt>Read receipt</dt><dd>{message?.read_at ? formatDateTime(message.read_at) : message?.delivered_at ? 'Not confirmed' : '—'}</dd></div>
-              <div><dt>Created</dt><dd>{formatDateTime(job.created_at)}</dd></div>
+            {showPdf && document?.preview_url && (
+              <section className="ds-pdf pf-rise" style={rise(1)} aria-label={`${documentLabel} PDF`}>
+                <header>
+                  <strong>{document.file_name ?? `${documentLabel}.pdf`}</strong>
+                  <span>
+                    <a className="dt-link" href={document.preview_url} target="_blank" rel="noreferrer">Open in new tab <ExternalLink size={13} aria-hidden="true" /></a>
+                    {document.download_url && <a className="dt-link" href={document.download_url} target="_blank" rel="noreferrer">Download <Download size={13} aria-hidden="true" /></a>}
+                  </span>
+                </header>
+                <iframe src={`${document.preview_url}#toolbar=1&navpanes=0&view=FitH`} title={`${documentLabel} ${invoice?.sap_billing_document ?? jobId}`} />
+              </section>
+            )}
+
+            <Journey
+              title="What happened"
+              hint={stage === 'queued' || stage === 'sent' ? 'Updates on its own' : 'Oldest to newest'}
+              items={journeyItems}
+              label="Delivery history"
+            />
+
+            <dl className="pf-ledger pf-rise" style={rise(2)}>
+              <div><dt>Document</dt><dd>{documentLabel}</dd><small>{explainer ?? ' '}</small></div>
+              <div><dt>Dated</dt><dd>{formatDate(invoice?.billing_document_date)}</dd><small>{invoice?.sap_billing_document ?? ' '}</small></div>
+              <div><dt>Sent</dt><dd>{sentAt ? formatDate(sentAt) : '—'}</dd><small>{sentAt ? formatTime(sentAt) : 'Not sent yet'}</small></div>
+              <div><dt>Read</dt><dd>{message?.read_at ? formatDate(message.read_at) : '—'}</dd><small>{message?.read_at ? formatTime(message.read_at) : message?.delivered_at ? 'Not confirmed' : 'Not yet'}</small></div>
             </dl>
-          </details>
+
+            <div className="pf-info pf-rise" style={rise(3)}>
+              <section className="pf-block" aria-label="Customer">
+                <p className="pf-kicker">Customer</p>
+                <h3>
+                  {customer?.id
+                    ? <button className="pf-link" type="button" onClick={() => onNavigate(`/customers/${customer.id}`)}>{customer.display_name}</button>
+                    : 'Customer unavailable'}
+                </h3>
+                <dl className="pf-rows">
+                  <StatementRow label="Customer code">{customer?.sap_customer_number ?? '—'}</StatementRow>
+                  <StatementRow label="Sent to" mono>{job.metadata?.masked_recipient ?? '—'}</StatementRow>
+                </dl>
+              </section>
+              <section className="pf-block" aria-label="Document">
+                <p className="pf-kicker">{documentLabel}</p>
+                <h3>{invoice?.sap_billing_document ?? `#${job.id}`}</h3>
+                <dl className="pf-rows">
+                  <StatementRow label={billingDocumentAmountLabel(documentType)}>{amount !== undefined ? formatCurrency(Number(amount), currency) : '—'}</StatementRow>
+                  <StatementRow label="Created in SAP">{formatDate(job.created_at)}</StatementRow>
+                </dl>
+              </section>
+            </div>
+
+            <details className="ds-tech pf-tech">
+              <summary>Technical details</summary>
+              <dl className="dt-details dt-details--stacked">
+                <div><dt>Reference</dt><dd>#{job.id}</dd></div>
+                <div><dt>Message format</dt><dd className="mono">{job.communication_templates?.name ?? job.metadata?.template_name ?? '—'}</dd></div>
+                <div><dt>WhatsApp message ID</dt><dd className="mono">{message?.provider_message_id ?? '—'}</dd></div>
+                <div><dt>Send attempts</dt><dd>{attempts.length} of {job.max_attempts}</dd></div>
+                <div><dt>Delivered</dt><dd>{formatDateTime(message?.delivered_at)}</dd></div>
+                <div><dt>Read receipt</dt><dd>{message?.read_at ? formatDateTime(message.read_at) : message?.delivered_at ? 'Not confirmed' : '—'}</dd></div>
+              </dl>
+            </details>
+
         </div>
       )}
     </AppShell>
@@ -331,100 +320,55 @@ function nextStepText(stage: Stage, paymentCase: PaymentFollowUpCase | null): st
   return receivable?.due_date ? `Payment is due ${formatDate(receivable.due_date)}.` : null;
 }
 
-type JourneyStep = { key: string; label: string; time?: string | null; note?: string; state: 'done' | 'current' | 'upcoming' | 'failed' };
-
-function journeySteps(job: DeliveryJobDetail, message: DeliveryMessage | undefined, stage: Stage, paymentCase: PaymentFollowUpCase | null): JourneyStep[] {
+function journeyList(
+  job: DeliveryJobDetail,
+  message: DeliveryMessage | undefined,
+  stage: Stage,
+  failureReason: string | null | undefined,
+  paymentCase: PaymentFollowUpCase | null,
+  openPayment: () => void,
+): JourneyItem[] {
   const order: Stage[] = ['queued', 'sent', 'delivered', 'read'];
-  const reached = stage === 'failed' ? (message?.sent_at ? 1 : 0) : order.indexOf(stage);
-  const steps: JourneyStep[] = [
-    { key: 'created', label: 'Created in SAP', time: job.created_at ?? job.scheduled_at, state: 'done' },
-    { key: 'sent', label: 'Sent', time: message?.sent_at, state: reached >= 1 ? 'done' : 'upcoming' },
-    { key: 'delivered', label: 'Delivered', time: message?.delivered_at, state: reached >= 2 ? 'done' : 'upcoming' },
-    { key: 'read', label: reached >= 3 ? 'Read' : 'Read not confirmed', time: message?.read_at, note: reached === 2 ? 'No receipt yet' : undefined, state: reached >= 3 ? 'done' : 'upcoming' },
+  const failed = stage === 'failed';
+  const reached = failed ? (message?.sent_at ? 1 : 0) : order.indexOf(stage);
+  const day = (value?: string | null) => (value ? formatDate(value) : 'Pending');
+  const items: JourneyItem[] = [
+    { key: 'created', state: 'done', title: 'Created in SAP', when: day(job.created_at ?? job.scheduled_at) },
   ];
-  if (stage === 'failed') {
-    steps[reached + 1] = { key: 'failed', label: 'Not delivered', time: message?.failed_at ?? job.completed_at, state: 'failed' };
-    return steps.slice(0, reached + 2);
+  if (!failed || reached >= 1) {
+    items.push({ key: 'sent', state: reached >= 1 ? 'done' : 'now', title: 'Sent', when: day(message?.sent_at) });
   }
+  if (failed) {
+    items.push({ key: 'failed', state: 'bad', title: 'Not delivered', when: day(message?.failed_at ?? job.completed_at), detail: failureReason ?? 'No reason was given.' });
+    return items;
+  }
+  items.push({ key: 'delivered', state: reached >= 2 ? 'done' : reached === 1 ? 'now' : 'next', title: 'Delivered', when: day(message?.delivered_at) });
+  items.push({
+    key: 'read',
+    state: reached >= 3 ? 'good' : reached === 2 ? 'now' : 'next',
+    title: 'Read',
+    when: message?.read_at ? formatDate(message.read_at) : reached === 2 ? 'Not confirmed' : 'Pending',
+  });
   if (paymentCase) {
     const receivable = paymentCase.receivable;
-    const paid = Boolean(paymentCase.resolved_at) || (receivable ? receivable.outstanding_amount <= 0 : false);
-    steps.push({ key: 'paid', label: 'Paid', time: paid ? paymentCase.resolved_at ?? receivable?.last_synced_at : null, state: paid ? 'done' : 'upcoming' });
+    const outstanding = Number(receivable?.outstanding_amount ?? 0);
+    const paid = Boolean(paymentCase.resolved_at) || (receivable ? outstanding <= 0 : false);
+    items.push(paid
+      ? { key: 'paid', state: 'good', title: 'Paid', when: day(paymentCase.resolved_at ?? receivable?.last_synced_at) }
+      : {
+          key: 'payment',
+          state: 'next',
+          title: 'Payment',
+          when: receivable?.due_date ? `Due ${formatDate(receivable.due_date)}` : 'Unpaid',
+          detail: <button className="pf-link" type="button" onClick={openPayment}>Open payment</button>,
+        });
   }
-  const next = steps.find((step) => step.state === 'upcoming');
-  if (next && (next.key === 'sent' || next.key === 'delivered' || next.key === 'read')) next.state = 'current';
-  return steps;
-}
-
-function PaymentPanel({ paymentCase, onOpen }: { paymentCase: PaymentFollowUpCase; onOpen: () => void }) {
-  const receivable = paymentCase.receivable;
-  const currency = receivable?.currency ?? 'INR';
-  const original = Number(receivable?.original_amount ?? paymentCase.invoice?.total_gross_amount ?? 0);
-  const paid = Number(receivable?.paid_amount ?? 0);
-  const outstanding = Number(receivable?.outstanding_amount ?? 0);
-  const paidShare = original > 0 ? Math.min(100, Math.round((paid / original) * 100)) : 0;
-  const late = receivable?.days_overdue ?? 0;
-  const reminders = paymentCase.jobs ?? (paymentCase.latestJob ? [paymentCase.latestJob] : []);
-  const settled = Boolean(paymentCase.resolved_at) || (receivable ? outstanding <= 0 : false);
-
-  return (
-    <section className="dt-section" aria-label="Payment">
-      <header className="dt-section__head">
-        <h3>Payment</h3>
-        <button className="dt-link" type="button" onClick={onOpen}>Open payment <ExternalLink size={13} aria-hidden="true" /></button>
-      </header>
-      <div className="dt-pay">
-        <div className="dt-pay__top">
-          <div>
-            <strong className={settled ? 'text-success' : late > 0 ? 'text-danger' : ''}>
-              {settled ? 'Paid in full' : `${formatCurrency(outstanding, currency)} still to pay`}
-            </strong>
-            <small>
-              {settled ? `${formatCurrency(paid, currency)} received` : `Due ${formatDate(receivable?.due_date)}${late > 0 ? ` · ${late} ${late === 1 ? 'day' : 'days'} late` : ''}`}
-            </small>
-          </div>
-          <span className="dt-pay__share">{paidShare}% paid</span>
-        </div>
-        <div className="dt-paid__track" role="img" aria-label={`${paidShare}% paid`}><span style={{ width: `${paidShare}%` }} /></div>
-        {reminders.length > 0 ? (
-          <ul className="dt-pay__reminders">
-            {reminders.map((reminder, index) => {
-              const reminderMessage = relationOne(reminder.messages);
-              return (
-                <li key={reminder.id}>
-                  <span>Reminder {reminders.length - index}</span>
-                  <small>{formatDateTime(reminderMessage?.sent_at ?? reminder.created_at)}</small>
-                  <StatusBadge status={reminderMessage?.status ?? reminder.status} />
-                </li>
-              );
-            })}
-          </ul>
-        ) : (
-          <p className="dt-pay__none">{paymentCase.next_action_at && !settled ? `First reminder goes out ${formatDateTime(paymentCase.next_action_at)}.` : 'No reminders sent.'}</p>
-        )}
-      </div>
-    </section>
-  );
+  return items;
 }
 
 function stageOf(job: DeliveryJobDetail, message?: DeliveryMessage): Stage {
   if (job.status === 'failed') return 'failed';
   return messageLifecycleState(message?.status ?? job.status, message);
-}
-
-function StageIcon({ stage, size }: { stage: Stage; size: number }) {
-  if (stage === 'failed') return <AlertCircle size={size} aria-hidden="true" />;
-  if (stage === 'queued') return <Clock3 size={size} aria-hidden="true" />;
-  if (stage === 'sent') return <Check size={size} strokeWidth={2.6} aria-hidden="true" />;
-  return <CheckCheck size={size} strokeWidth={2.4} aria-hidden="true" />;
-}
-
-function MessageTicks({ stage }: { stage: Stage }) {
-  if (stage === 'failed') return <AlertCircle className="dt-ticks dt-ticks--failed" size={13} aria-label="Failed" />;
-  if (stage === 'queued') return <Clock3 className="dt-ticks" size={12} aria-label="Queued" />;
-  if (stage === 'sent') return <Check className="dt-ticks" size={14} aria-label="Sent" />;
-  if (stage === 'read') return <CheckCheck className="dt-ticks dt-ticks--read" size={14} aria-label="Read" />;
-  return <CheckCheck className="dt-ticks" size={14} aria-label="Delivered; read not confirmed" />;
 }
 
 function preserveDocumentUrls(
@@ -451,11 +395,6 @@ function preserveDocumentUrls(
       };
     }),
   };
-}
-
-function formatTime(value?: string | null): string {
-  if (!value) return '';
-  return new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(value));
 }
 
 function readTemplateVariables(attempt?: MessageAttempt): Record<string, string> {

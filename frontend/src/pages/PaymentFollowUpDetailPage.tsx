@@ -1,7 +1,8 @@
-import { AlertCircle, BadgeIndianRupee, BellRing, Check, CheckCheck, CircleCheck, Clock3, RotateCcw, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { AlertCircle, BadgeIndianRupee, BellRing, Check, CircleCheck, Clock3, RotateCcw, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { BackLink } from '../components/BackLink';
+import { Amount, Bubble, Journey, LIFECYCLE_LABEL, PhoneFrame, StatementRow, formatTime, rise, type JourneyItem, type PageTone } from '../components/statement';
 import { Modal } from '../components/Modal';
 import { apiRequest } from '../lib/api';
 import { formatCurrency, formatDate, formatDateTime, toMessage } from '../lib/format';
@@ -16,7 +17,6 @@ import {
 } from '../types';
 
 type Tone = MessageLifecycleState;
-type PageTone = 'paid' | 'late' | 'critical' | 'due' | 'calm';
 
 type PaymentDetailsForm = {
   paymentDate: string;
@@ -126,7 +126,6 @@ export function PaymentFollowUpDetailPage({
 
   const confirmation = receivable?.raw_data?.payment_confirmation;
   const heroValue = receivable ? (settled ? original : outstanding) : 0;
-  const shownAmount = useCountUp(heroValue);
   const chatRef = useRef<HTMLDivElement>(null);
   const hasCase = Boolean(paymentCase);
   useEffect(() => {
@@ -198,44 +197,69 @@ export function PaymentFollowUpDetailPage({
       ? `Recorded${confirmation?.marked_by ? ` by ${confirmation.marked_by}` : ''} on ${formatDateTime(confirmation?.confirmed_at)}`
       : 'The full amount has been received'
     : dueDate ? `${daysOverdue > 0 ? 'Was due' : 'Due'} on ${formatDate(dueDate)}` : 'No due date set yet';
-  const money = moneyParts(shownAmount, currency);
   const initials = (customer?.display_name ?? '?').split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]?.toUpperCase()).join('');
 
-  // Collection timeline: one axis scaled by real dates, so lateness and reminder spacing are visible at a glance.
+  // The story so far, in plain words, oldest first.
   const nowMs = Date.now();
   const issueMs = parseDay(paymentCase?.invoice?.billing_document_date);
   const dueMs = parseDay(dueDate);
   const paidMs = settled ? Date.parse(confirmation?.payment_date ?? paymentCase?.resolved_at ?? '') : Number.NaN;
   const scheduledMs = !settled && nextReminderAt ? Date.parse(nextReminderAt) : Number.NaN;
+  const who = customer?.display_name ?? 'the customer';
   const points = jobs
     .map((job, index) => {
       const message = relationOne(job.messages);
-      return { id: job.id, n: jobs.length - index, tone: toneOf(job), ms: Date.parse(message?.sent_at ?? job.created_at) };
+      return {
+        id: job.id,
+        n: jobs.length - index,
+        tone: toneOf(job),
+        ms: Date.parse(message?.sent_at ?? job.created_at),
+        failure: message?.failure_reason ?? job.last_error ?? null,
+      };
     })
     .filter((point) => Number.isFinite(point.ms))
     .sort((a, b) => a.ms - b.ms);
-  const runEndMs = settled ? (Number.isFinite(paidMs) ? paidMs : nowMs) : nowMs;
-  const stamps = [issueMs, dueMs, runEndMs, scheduledMs, ...points.map((point) => point.ms)].filter((value) => Number.isFinite(value));
-  const axisStart = Number.isFinite(issueMs) ? issueMs : Math.min(...stamps);
-  const axisSpan = Math.max(Math.max(...stamps) - axisStart, 7 * 86_400_000) * 1.06;
-  const at = (ms: number) => Math.min(100, Math.max(0, ((ms - axisStart) / axisSpan) * 100));
-  const edgeLabels = [
-    { key: 'issued', kicker: 'Issued', ms: issueMs, text: formatDate(paymentCase?.invoice?.billing_document_date) },
-    { key: 'due', kicker: 'Due', ms: dueMs, text: formatDate(dueDate) },
-    { key: 'paid', kicker: 'Paid', ms: paidMs, text: formatDate(confirmation?.payment_date ?? paymentCase?.resolved_at) },
-  ]
-    .filter((label) => Number.isFinite(label.ms))
-    .sort((a, b) => a.ms - b.ms)
-    .reduce<Array<{ key: string; kicker: string; text: string; x: number; row: number }>>((placed, label) => {
-      const x = at(label.ms);
-      const previous = placed[placed.length - 1];
-      const row = previous && x - previous.x < 15 && previous.row === 0 ? 1 : 0;
-      placed.push({ key: label.key, kicker: label.kicker, text: label.text, x, row });
-      return placed;
-    }, []);
   const lastReminderAt = paymentCase?.last_reminder_at ?? (points.length ? new Date(points[points.length - 1].ms).toISOString() : null);
-  const legendTones = [...new Set(points.map((point) => point.tone))];
-  const rulerSummary = `Timeline. Invoice issued ${formatDate(paymentCase?.invoice?.billing_document_date)}, due ${formatDate(dueDate)}, ${points.length} ${points.length === 1 ? 'reminder' : 'reminders'} sent${settled ? ', paid' : ''}.`;
+  const journey: Array<JourneyItem & { ms: number }> = [];
+  if (Number.isFinite(issueMs)) {
+    journey.push({ key: 'issued', ms: issueMs, state: 'done', title: 'Invoice issued', when: formatDate(paymentCase?.invoice?.billing_document_date) });
+  }
+  if (Number.isFinite(dueMs)) {
+    const dueInFuture = dueMs > nowMs;
+    journey.push({ key: 'due', ms: dueMs, state: settled ? 'done' : dueInFuture ? 'next' : 'bad', title: dueInFuture ? 'Payment due' : 'Payment was due', when: formatDate(dueDate) });
+  }
+  points.forEach((point) => {
+    journey.push({
+      key: `reminder-${point.id}`,
+      ms: point.ms,
+      state: point.tone === 'failed' ? 'bad' : 'done',
+      title: `Reminder ${point.n}`,
+      when: formatDate(new Date(point.ms).toISOString()),
+      chip: { label: LIFECYCLE_LABEL[point.tone], tone: point.tone },
+    });
+  });
+  if (settled) {
+    journey.push({
+      key: 'paid',
+      ms: Number.isFinite(paidMs) ? paidMs : nowMs,
+      state: 'good',
+      title: 'Paid',
+      when: formatDate(confirmation?.payment_date ?? paymentCase?.resolved_at),
+      detail: confirmation?.payment_method ? methodLabel(confirmation.payment_method) : undefined,
+    });
+  } else {
+    journey.push({
+      key: 'today',
+      ms: nowMs,
+      state: 'now',
+      title: 'Today',
+      when: daysOverdue > 0 ? `${daysOverdue} ${daysOverdue === 1 ? 'day' : 'days'} overdue` : 'Unpaid',
+    });
+    if (Number.isFinite(scheduledMs)) {
+      journey.push({ key: 'scheduled', ms: scheduledMs, state: 'next', title: `Reminder ${jobs.length + 1}`, when: formatDate(nextReminderAt), chip: { label: 'Scheduled', tone: 'scheduled' } });
+    }
+  }
+  journey.sort((a, b) => a.ms - b.ms);
 
   // Conversation, oldest first like WhatsApp itself.
   const thread = [...jobs].reverse().map((job, index) => {
@@ -275,20 +299,12 @@ export function PaymentFollowUpDetailPage({
       )}
       {loading && <div className="detail-skeleton"><span /><div><span /><span /></div></div>}
       {paymentCase && (
-        <div className="pf" data-tone={tone}>
-          <div className="pf-main">
-            <header className="pf-hero pf-rise" style={{ '--i': 0 } as CSSProperties}>
+        <div className="pf pf--stack" data-tone={tone}>
+          <div className="pf-top">
+            <header className="pf-hero pf-rise" style={rise(0)}>
               <span className="pf-pill"><i aria-hidden="true" />{pill}</span>
               <p className="pf-hero__label">{amountLabel}</p>
-              <p className="pf-amount" aria-label={receivable ? formatCurrency(heroValue, currency) : undefined}>
-                {receivable ? (
-                  <>
-                    <span className="pf-amount__cur" aria-hidden="true">{money.cur}</span>
-                    <span aria-hidden="true">{money.int}</span>
-                    <span className="pf-amount__dec" aria-hidden="true">{money.dec}</span>
-                  </>
-                ) : '—'}
-              </p>
+              <Amount value={heroValue} currency={currency} available={Boolean(receivable)} />
               <p className="pf-hero__detail">
                 <span>{heroDetail}</span>
                 {!settled && nextReminderAt && <span className="pf-hero__next"><BellRing size={13} aria-hidden="true" /> Next reminder {formatDateTime(nextReminderAt)}</span>}
@@ -308,61 +324,54 @@ export function PaymentFollowUpDetailPage({
                 </div>
               )}
             </header>
-
-            {stamps.length > 0 && (
-              <section className="pf-timeline pf-rise" style={{ '--i': 1 } as CSSProperties} aria-label="Collection timeline">
-                <div className={`pf-ruler${edgeLabels.some((label) => label.row === 1) ? ' pf-ruler--tall' : ''}`} role="img" aria-label={rulerSummary}>
-                  <div className="pf-ruler__plot">
-                    <span className="pf-ruler__base" />
-                    <span className="pf-ruler__run" style={{ width: `${at(runEndMs)}%` }} />
-                    {!settled && Number.isFinite(dueMs) && nowMs > dueMs && (
-                      <span className="pf-ruler__late" style={{ left: `${at(dueMs)}%`, width: `${Math.max(at(nowMs) - at(dueMs), 0.6)}%` }} />
-                    )}
-                    {Number.isFinite(scheduledMs) && scheduledMs > nowMs && (
-                      <span className="pf-ruler__ahead" style={{ left: `${at(nowMs)}%`, width: `${at(scheduledMs) - at(nowMs)}%` }} />
-                    )}
-                    {Number.isFinite(issueMs) && <span className="pf-mark pf-mark--node" style={{ left: `${at(issueMs)}%` }} />}
-                    {Number.isFinite(dueMs) && <span className="pf-mark pf-mark--node pf-mark--due" style={{ left: `${at(dueMs)}%` }} />}
-                    {points.map((point) => (
-                      <span key={point.id} className={`pf-mark pf-mark--reminder pf-mark--${point.tone}`} style={{ left: `${at(point.ms)}%` }} title={`Reminder ${point.n} · ${TONE_LABEL[point.tone]} · ${formatDateTime(new Date(point.ms).toISOString())}`} />
-                    ))}
-                    {Number.isFinite(scheduledMs) && scheduledMs > nowMs && !(Number.isFinite(dueMs) && Math.abs(at(scheduledMs) - at(dueMs)) < 3) && (
-                      <span className="pf-mark pf-mark--reminder pf-mark--scheduled" style={{ left: `${at(scheduledMs)}%` }} title={`Scheduled · ${formatDateTime(nextReminderAt)}`} />
-                    )}
-                    {settled && Number.isFinite(paidMs) && (
-                      <span className="pf-mark pf-mark--paid" style={{ left: `${at(paidMs)}%` }}><Check size={11} strokeWidth={3.2} aria-hidden="true" /></span>
-                    )}
-                    {!settled && (
-                      <span className="pf-today" style={{ left: `${at(nowMs)}%` }}><b>Today</b></span>
-                    )}
-                    {edgeLabels.map((label) => (
-                      <span
-                        key={label.key}
-                        className={`pf-edge pf-edge--row${label.row}${label.x < 9 ? ' pf-edge--start' : label.x > 91 ? ' pf-edge--end' : ''}`}
-                        style={{ left: `${label.x}%` }}
-                      >
-                        <small>{label.kicker}</small>{label.text}
-                      </span>
-                    ))}
+            <PhoneFrame
+            name={customer?.display_name ?? 'Customer'}
+            subtitle={paymentCase.whatsappNumber ?? 'WhatsApp'}
+            badge={`${jobs.length} ${jobs.length === 1 ? 'reminder' : 'reminders'}`}
+            bodyRef={chatRef}
+            style={rise(2)}
+          >
+            {days.length === 0 && !scheduledDay && (
+              <div className="pf-phone__empty">
+                <BadgeIndianRupee size={22} aria-hidden="true" />
+                <strong>No reminders sent</strong>
+                <p>{settled ? 'This invoice was settled before any reminder was needed.' : 'Reminders start if the invoice isn’t paid on time.'}</p>
+              </div>
+            )}
+            {days.map((day) => (
+              <section className="pf-day" key={day.key} aria-label={day.label}>
+                <h4>{day.label}</h4>
+                {day.items.map(({ job, message, n, ms, tone: messageTone, failure }) => (
+                  <div className="pf-turn" key={job.id}>
+                    <Bubble tag={`Reminder ${n}`} tone={messageTone} time={formatTime(Number.isFinite(ms) ? new Date(ms).toISOString() : job.created_at)}>
+                      <p>{message?.body ?? `Payment reminder for invoice ${invoiceNumber ?? ''}`.trim()}</p>
+                    </Bubble>
+                    {failure && <p className="pf-notice"><AlertCircle size={12} aria-hidden="true" /> {failure}</p>}
                   </div>
-                </div>
-                {(legendTones.length > 0 || Number.isFinite(scheduledMs)) && (
-                  <ul className="pf-legend" aria-hidden="true">
-                    {legendTones.map((legendTone) => <li key={legendTone}><i className={`pf-key pf-key--${legendTone}`} />{TONE_LABEL[legendTone]}</li>)}
-                    {!settled && Number.isFinite(scheduledMs) && <li><i className="pf-key pf-key--scheduled" />Scheduled</li>}
-                  </ul>
-                )}
+                ))}
+              </section>
+            ))}
+            {!settled && nextReminderAt && (
+              <section className="pf-day" aria-label="Scheduled">
+                <h4>{scheduledDay === 'Today' ? 'Later today' : scheduledDay}</h4>
+                <Bubble tag={`Reminder ${jobs.length + 1} · scheduled`} scheduled>
+                  <p><Clock3 size={13} aria-hidden="true" /> Goes out {formatDateTime(nextReminderAt)}</p>
+                </Bubble>
               </section>
             )}
+          </PhoneFrame>
+          </div>
 
-            <dl className="pf-ledger pf-rise" style={{ '--i': 2 } as CSSProperties}>
+            <Journey title="What happened" hint="Oldest to newest" items={journey} label="Payment history" />
+
+            <dl className="pf-ledger pf-rise" style={rise(2)}>
               <div><dt>Invoice total</dt><dd>{receivable ? formatCurrency(original, currency) : '—'}</dd></div>
               <div><dt>Received</dt><dd className={paid > 0 ? 'pf-pos' : undefined}>{receivable ? formatCurrency(paid, currency) : '—'}<small>{paidShare}% of invoice</small></dd></div>
               <div><dt>Lateness</dt><dd>{receivable?.aging_bucket && !settled ? agingLabel(receivable.aging_bucket) : settled ? 'Settled' : '—'}<small>{receivable?.payment_status ? humanize(receivable.payment_status) : ' '}</small></dd></div>
               <div><dt>Reminders</dt><dd>{sentCount} sent<small>{lastReminderAt ? `Last ${formatDate(lastReminderAt)}` : 'None yet'}</small></dd></div>
             </dl>
 
-            <div className="pf-info pf-rise" style={{ '--i': 3 } as CSSProperties}>
+            <div className="pf-info pf-rise" style={rise(3)}>
               <section className="pf-block" aria-label="Customer">
                 <p className="pf-kicker">Customer</p>
                 <h3>
@@ -407,54 +416,7 @@ export function PaymentFollowUpDetailPage({
                 <div><dt>Last synced from SAP</dt><dd>{formatDateTime(receivable?.last_synced_at)}</dd></div>
               </dl>
             </details>
-          </div>
 
-          <aside className="pf-phone pf-rise" style={{ '--i': 2 } as CSSProperties} aria-label="Reminder conversation">
-            <header className="pf-phone__bar">
-              <span className="pf-phone__avatar" aria-hidden="true">{initials}</span>
-              <div>
-                <strong>{customer?.display_name ?? 'Customer'}</strong>
-                <small className="mono">{paymentCase.whatsappNumber ?? 'WhatsApp'}</small>
-              </div>
-              <span className="pf-phone__count">{jobs.length} {jobs.length === 1 ? 'reminder' : 'reminders'}</span>
-            </header>
-            <div className="pf-phone__body" ref={chatRef}>
-              {days.length === 0 && !scheduledDay && (
-                <div className="pf-phone__empty">
-                  <BadgeIndianRupee size={22} aria-hidden="true" />
-                  <strong>No reminders sent</strong>
-                  <p>{settled ? 'This invoice was settled before any reminder was needed.' : 'Reminders start if the invoice isn’t paid on time.'}</p>
-                </div>
-              )}
-              {days.map((day) => (
-                <section className="pf-day" key={day.key} aria-label={day.label}>
-                  <h4>{day.label}</h4>
-                  {day.items.map(({ job, message, n, ms, tone: messageTone, failure }) => (
-                    <div className="pf-turn" key={job.id}>
-                      <div className={`pf-bubble${messageTone === 'failed' ? ' pf-bubble--failed' : ''}`}>
-                        <b className="pf-bubble__tag">Reminder {n}</b>
-                        <p>{message?.body ?? `Payment reminder for invoice ${invoiceNumber ?? ''}`.trim()}</p>
-                        <span className="pf-bubble__meta">
-                          {formatTime(Number.isFinite(ms) ? new Date(ms).toISOString() : job.created_at)}
-                          <ReminderTicks tone={messageTone} />
-                        </span>
-                      </div>
-                      {failure && <p className="pf-notice"><AlertCircle size={12} aria-hidden="true" /> {failure}</p>}
-                    </div>
-                  ))}
-                </section>
-              ))}
-              {!settled && nextReminderAt && (
-                <section className="pf-day" aria-label="Scheduled">
-                  <h4>{scheduledDay === 'Today' ? 'Later today' : scheduledDay}</h4>
-                  <div className="pf-bubble pf-bubble--scheduled">
-                    <b className="pf-bubble__tag">Reminder {jobs.length + 1} · scheduled</b>
-                    <p><Clock3 size={13} aria-hidden="true" /> Goes out {formatDateTime(nextReminderAt)}</p>
-                  </div>
-                </section>
-              )}
-            </div>
-          </aside>
         </div>
       )}
       {confirmingPaid && paymentCase && (
@@ -609,56 +571,6 @@ function toneOf(job: PaymentReminderJob): Tone {
   return messageLifecycleState(message?.status ?? job.status, message);
 }
 
-function ReminderTicks({ tone }: { tone: Tone }) {
-  if (tone === 'failed') return <AlertCircle className="dt-ticks dt-ticks--failed" size={13} aria-label="Failed" />;
-  if (tone === 'queued') return <Clock3 className="dt-ticks" size={12} aria-label="Queued" />;
-  if (tone === 'sent') return <Check className="dt-ticks" size={14} aria-label="Sent" />;
-  if (tone === 'read') return <CheckCheck className="dt-ticks dt-ticks--read" size={14} aria-label="Read" />;
-  return <CheckCheck className="dt-ticks" size={14} aria-label="Delivered; read not confirmed" />;
-}
-
-function formatTime(value?: string | null): string {
-  if (!value) return '';
-  return new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(value));
-}
-
-const TONE_LABEL: Record<Tone, string> = {
-  queued: 'Queued',
-  sent: 'Sent',
-  delivered: 'Delivered',
-  read: 'Read',
-  failed: 'Failed',
-};
-
-const AGING_LABELS: Record<string, string> = {
-  current: 'Not yet due',
-  due: 'Due today',
-  late30: '1–30 days',
-  late60: '31–60 days',
-  late60plus: '60+ days',
-};
-
-function agingLabel(bucket: string): string {
-  return AGING_LABELS[bucket] ?? humanize(bucket);
-}
-
-function methodLabel(method: string): string {
-  return PAYMENT_METHOD_OPTIONS.find((option) => option.value === method)?.label ?? humanize(method);
-}
-
-/** Whole days from today (India) to a YYYY-MM-DD date; negative once it has passed. */
-function daysUntil(date?: string | null): number | null {
-  if (!date) return null;
-  const due = Date.parse(`${date.slice(0, 10)}T00:00:00Z`);
-  const today = Date.parse(`${todayInIndia()}T00:00:00Z`);
-  return Number.isNaN(due) ? null : Math.round((due - today) / 86_400_000);
-}
-
-function humanize(value: string): string {
-  const text = value.replaceAll('_', ' ');
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
 function indiaDay(date: Date): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Kolkata',
@@ -690,44 +602,31 @@ function parseDay(value?: string | null): number {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) ? Date.parse(`${value}T00:00:00Z`) : Date.parse(value);
 }
 
-function moneyParts(amount: number, currency: string): { cur: string; int: string; dec: string } {
-  const parts = new Intl.NumberFormat('en-IN', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).formatToParts(amount);
-  const join = (types: string[]) => parts.filter((part) => types.includes(part.type)).map((part) => part.value).join('');
-  return { cur: join(['currency']), int: join(['integer', 'group']), dec: join(['decimal', 'fraction']) };
+function humanize(value: string): string {
+  const text = value.replaceAll('_', ' ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-/** Eases a number up to its target so the headline amount settles in rather than popping. */
-function useCountUp(target: number): number {
-  const [value, setValue] = useState(0);
-  const from = useRef(0);
-  useEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      from.current = target;
-      setValue(target);
-      return;
-    }
-    const start = from.current;
-    const began = performance.now();
-    let frame = 0;
-    const tick = (time: number) => {
-      const progress = Math.min(1, (time - began) / 900);
-      const next = start + (target - start) * (1 - (1 - progress) ** 4);
-      from.current = next;
-      setValue(next);
-      if (progress < 1) frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [target]);
-  return value;
+const AGING_LABELS: Record<string, string> = {
+  current: 'Not yet due',
+  due: 'Due today',
+  late30: '1–30 days',
+  late60: '31–60 days',
+  late60plus: '60+ days',
+};
+
+function agingLabel(bucket: string): string {
+  return AGING_LABELS[bucket] ?? humanize(bucket);
 }
 
-function StatementRow({ label, children, mono, wrap }: { label: string; children: ReactNode; mono?: boolean; wrap?: boolean }) {
-  return (
-    <div className={`pf-row${wrap ? ' pf-row--wrap' : ''}`}>
-      <dt>{label}</dt>
-      {!wrap && <i className="pf-leader" aria-hidden="true" />}
-      <dd className={mono ? 'mono' : undefined}>{children}</dd>
-    </div>
-  );
+function methodLabel(method: string): string {
+  return PAYMENT_METHOD_OPTIONS.find((option) => option.value === method)?.label ?? humanize(method);
+}
+
+/** Whole days from today (India) to a YYYY-MM-DD date; negative once it has passed. */
+function daysUntil(date?: string | null): number | null {
+  if (!date) return null;
+  const due = Date.parse(`${date.slice(0, 10)}T00:00:00Z`);
+  const today = Date.parse(`${todayInIndia()}T00:00:00Z`);
+  return Number.isNaN(due) ? null : Math.round((due - today) / 86_400_000);
 }
