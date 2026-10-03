@@ -1,6 +1,7 @@
 import { ArrowRight } from 'lucide-react';
 import { formatDateTime } from '../lib/format';
 import { billingDocumentLabel } from '../lib/billing-documents';
+import { messageLifecycleState } from '../lib/message-status';
 import type { DeliveryJob } from '../types';
 import { relationOne } from '../types';
 import { StatusBadge } from './StatusBadge';
@@ -32,13 +33,18 @@ export function DeliveryTable({
             const invoice = relationOne(job.invoices);
             const customer = relationOne(job.customers);
             const message = relationOne(job.messages);
+            const status = messageLifecycleState(message?.status ?? job.status, message);
             return (
               <tr key={job.id}>
                 <td><strong className="invoice-number">{invoice?.sap_billing_document ?? `Document #${job.id}`}</strong></td>
                 <td><span className="document-type-code">{invoice?.billing_document_type ?? job.metadata?.billing_document_type ?? '—'}</span><small>{billingDocumentLabel(invoice?.billing_document_type ?? job.metadata?.billing_document_type)}</small></td>
                 <td>{customer?.display_name ?? '—'}</td>
                 <td className="mono">{job.metadata?.masked_recipient ?? '—'}</td>
-                <td><StatusBadge status={message?.status ?? job.status} /></td>
+                <td>
+                  <StatusBadge status={status} />
+                  {status === 'read' && message?.read_at && <small>Read {formatDateTime(message.read_at)}</small>}
+                  {status === 'delivered' && <small>Read not confirmed</small>}
+                </td>
                 <td>{formatDateTime(job.created_at ?? job.scheduled_at)}</td>
                 <td>
                   <button className="row-open-button" type="button" onClick={() => onOpen(job.id)} aria-label={`Open delivery ${invoice?.sap_billing_document ?? job.id}`}>

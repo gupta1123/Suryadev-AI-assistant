@@ -15,8 +15,7 @@ msg91WebhookRouter.post(
   asyncHandler(async (request, response) => {
     verifyWebhookSecret(request.header('x-msg91-webhook-secret'));
     const payload = isRecord(request.body) ? request.body : { value: request.body };
-    const eventType = findString(payload, ['event_type', 'event', 'status', 'type']) ?? 'unknown';
-    const externalEventId = findString(payload, ['event_id', 'eventId']);
+    const eventType = msg91WebhookEventType(payload);
     const providerMessageId = findString(payload, [
       'message_id',
       'messageId',
@@ -25,6 +24,10 @@ msg91WebhookRouter.post(
       'vendorId',
     ]);
     const providerRequestId = findString(payload, ['request_id', 'requestId']);
+    const externalEventId = findString(payload, ['event_id', 'eventId']) ??
+      (providerMessageId && eventType !== 'unknown'
+        ? `${providerMessageId}:${eventType.toLowerCase()}`
+        : undefined);
     const client = getSupabaseServerClient();
     const { data: provider } = await client
       .from('provider_integrations')
@@ -33,7 +36,7 @@ msg91WebhookRouter.post(
       .eq('channel', 'whatsapp')
       .maybeSingle();
 
-    const { data: event, error: insertError } = await client
+    const { data: insertedEvent, error: insertError } = await client
       .from('provider_webhook_events')
       .insert({
         provider_integration_id: provider?.id ?? null,
@@ -46,31 +49,51 @@ msg91WebhookRouter.post(
       })
       .select('id')
       .single();
+    let event = insertedEvent;
     if (insertError?.code === '23505') {
-      response.status(200).json({ ok: true, duplicate: true });
-      return;
+      if (!externalEventId) {
+        response.status(200).json({ ok: true, duplicate: true });
+        return;
+      }
+      const { data: existingEvent, error: existingEventError } = await client
+        .from('provider_webhook_events')
+        .select('id,processed_at')
+        .eq('provider', 'msg91')
+        .eq('external_event_id', externalEventId)
+        .single();
+      if (existingEventError || !existingEvent) {
+        throw new HttpError(500, 'Unable to recover the existing MSG91 webhook');
+      }
+      if (existingEvent.processed_at) {
+        response.status(200).json({ ok: true, duplicate: true });
+        return;
+      }
+      event = { id: existingEvent.id };
     }
-    if (insertError || !event) throw new HttpError(500, 'Unable to store MSG91 webhook');
+    if ((insertError && insertError.code !== '23505') || !event) {
+      throw new HttpError(500, 'Unable to store MSG91 webhook');
+    }
 
     try {
       const status = normalizeMsg91Status(eventType);
       if (status) {
+        const eventTimestamp = msg91Timestamp(findValue(payload, ['ts', 'statusUpdatedAt']));
+        const sentAt = msg91Timestamp(findValue(payload, ['sentTime', 'sent_at', 'sentAt'])) ||
+          (status === 'sent' ? eventTimestamp : '');
+        const deliveredAt = msg91Timestamp(findValue(payload, ['deliveryTime', 'delivered_at', 'deliveredAt'])) ||
+          (status === 'delivered' ? eventTimestamp : '');
+        const readAt = msg91Timestamp(findValue(payload, ['readTime', 'read_at', 'readAt'])) ||
+          (status === 'read' ? eventTimestamp : '');
         const update = await applyProviderDeliveryStatus({
           ...(providerRequestId ? { providerRequestId } : {}),
           ...(providerMessageId ? { providerMessageId } : {}),
           status,
-          ...(msg91Timestamp(findValue(payload, ['sentTime', 'sent_at', 'sentAt']))
-            ? { sentAt: msg91Timestamp(findValue(payload, ['sentTime', 'sent_at', 'sentAt'])) }
-            : {}),
-          ...(msg91Timestamp(findValue(payload, ['deliveryTime', 'delivered_at', 'deliveredAt']))
-            ? { deliveredAt: msg91Timestamp(findValue(payload, ['deliveryTime', 'delivered_at', 'deliveredAt'])) }
-            : {}),
-          ...(msg91Timestamp(findValue(payload, ['readTime', 'read_at', 'readAt']))
-            ? { readAt: msg91Timestamp(findValue(payload, ['readTime', 'read_at', 'readAt'])) }
-            : {}),
+          ...(sentAt ? { sentAt } : {}),
+          ...(deliveredAt ? { deliveredAt } : {}),
+          ...(readAt ? { readAt } : {}),
           ...(status === 'failed'
             ? {
-                failedAt: new Date().toISOString(),
+                failedAt: eventTimestamp || new Date().toISOString(),
                 failureCode: findString(payload, ['metaErrorCode', 'error_code', 'code']) ?? 'msg91_failed',
                 failureReason:
                   findString(payload, ['failureReason', 'reason', 'error', 'description']) ??
@@ -109,6 +132,18 @@ msg91WebhookRouter.post(
     response.status(200).json({ ok: true });
   }),
 );
+
+export function msg91WebhookEventType(payload: Record<string, unknown>): string {
+  return findString(payload, [
+    // Webhook (New) uses eventName; the remaining keys support older payloads.
+    'eventName',
+    'event_name',
+    'event_type',
+    'event',
+    'status',
+    'type',
+  ]) ?? 'unknown';
+}
 
 function verifyWebhookSecret(received: string | undefined): void {
   if (!env.MSG91_WEBHOOK_SECRET) {

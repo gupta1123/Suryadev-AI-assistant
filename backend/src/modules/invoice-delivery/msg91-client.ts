@@ -24,6 +24,18 @@ export type Msg91PaymentReminderInput = {
   teamName: string;
 };
 
+export type Msg91HelpRequestAlertInput = {
+  recipient: string;
+  templateName: string;
+  templateLanguage: string;
+  customerName: string;
+  customerNumber: string;
+  billingDocument: string;
+  billingDocumentDate: string;
+  formattedAmount: string;
+  requestedAt: string;
+};
+
 export async function isPaymentReminderTemplateApproved(
   timeoutMs = 20_000,
 ): Promise<boolean> {
@@ -137,6 +149,38 @@ export function buildMsg91PaymentReminderPayload(
   };
 }
 
+export function buildMsg91HelpRequestAlertPayload(
+  input: Msg91HelpRequestAlertInput,
+): Record<string, unknown> {
+  return {
+    integrated_number: digitsOnly(env.MSG91_INTEGRATED_NUMBER),
+    content_type: 'template',
+    payload: {
+      type: 'template',
+      template: {
+        name: input.templateName,
+        language: {
+          code: input.templateLanguage,
+          policy: 'deterministic',
+        },
+        to_and_components: [
+          {
+            to: [digitsOnly(input.recipient)],
+            components: {
+              body_1: { type: 'text', value: input.customerName },
+              body_2: { type: 'text', value: input.customerNumber },
+              body_3: { type: 'text', value: input.billingDocument },
+              body_4: { type: 'text', value: input.billingDocumentDate },
+              body_5: { type: 'text', value: input.formattedAmount },
+              body_6: { type: 'text', value: input.requestedAt },
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
 export async function sendInvoiceTemplate(
   input: Msg91TemplateInput,
   timeoutMs = 20_000,
@@ -162,6 +206,19 @@ export async function sendPaymentReminderTemplate(
     throw new Error('Payment reminder sending is disabled');
   }
   return sendTemplatePayload(buildMsg91PaymentReminderPayload(input), timeoutMs);
+}
+
+export async function sendHelpRequestAlertTemplate(
+  input: Msg91HelpRequestAlertInput,
+  timeoutMs = 20_000,
+): Promise<Msg91SendResult> {
+  if (!env.MSG91_AUTHKEY || !digitsOnly(env.MSG91_INTEGRATED_NUMBER)) {
+    throw new Error('MSG91 is not configured');
+  }
+  if (!env.MSG91_SEND_ENABLED || !env.MSG91_HELP_REQUEST_ALERT_ENABLED) {
+    throw new Error('Help request alert sending is disabled');
+  }
+  return sendTemplatePayload(buildMsg91HelpRequestAlertPayload(input), timeoutMs);
 }
 
 async function sendTemplatePayload(

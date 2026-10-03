@@ -19,6 +19,8 @@ export async function apiRequest<T>(
 ): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
+    // Status screens poll for provider receipts; never reuse a cached GET response.
+    cache: init?.cache ?? 'no-store',
     credentials: 'include',
     headers: {
       ...(init?.body ? { 'content-type': 'application/json' } : {}),

@@ -2,8 +2,8 @@ import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
-import { env } from './config/env.js';
 import { errorHandler } from './lib/http.js';
+import { isTrustedRequestOrigin } from './lib/origin.js';
 import { authRouter } from './modules/auth/routes.js';
 import { customersRouter } from './modules/customers/routes.js';
 import { invoiceDeliveryRouter } from './modules/invoice-delivery/routes.js';
@@ -17,7 +17,9 @@ app.disable('x-powered-by');
 app.use(helmet());
 app.use(
   cors({
-    origin: env.FRONTEND_ORIGIN,
+    origin(origin, callback) {
+      callback(null, isTrustedRequestOrigin(origin));
+    },
     credentials: true,
   }),
 );

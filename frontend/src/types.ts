@@ -328,6 +328,14 @@ export type CursorPage<T> = {
   nextCursor: number | null;
 };
 
+export type OffsetPage<T> = {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
+  pageCount: number;
+};
+
 export type HelpRequestPage = CursorPage<HelpRequest> & {
   counts: Record<'all' | HelpRequestStatus, number>;
 };
@@ -402,6 +410,7 @@ export type PaymentReminderMessage = {
   provider_message_id?: string | null;
   sent_at?: string | null;
   delivered_at?: string | null;
+  read_at?: string | null;
   failed_at?: string | null;
   failure_reason?: string | null;
   message_attempts?: MessageAttempt[];
@@ -455,6 +464,11 @@ export type PaymentFollowUpCase = {
         source: string;
         marked_by?: string | null;
         confirmed_at: string;
+        outstanding_before?: number;
+        payment_date?: string;
+        payment_method?: 'bank_transfer' | 'upi' | 'cheque' | 'cash' | 'card' | 'other';
+        reference_number?: string;
+        notes?: string;
       };
     };
   } | null;

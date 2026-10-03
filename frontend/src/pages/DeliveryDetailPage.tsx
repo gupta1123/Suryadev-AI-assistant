@@ -28,6 +28,7 @@ import {
   formatDateTime,
   toMessage,
 } from '../lib/format';
+import { messageLifecycleState, type MessageLifecycleState } from '../lib/message-status';
 import type {
   AdminUser,
   AppRoute,
@@ -38,7 +39,7 @@ import type {
 } from '../types';
 import { relationOne } from '../types';
 
-type Stage = 'queued' | 'sent' | 'delivered' | 'failed';
+type Stage = MessageLifecycleState;
 
 export function DeliveryDetailPage({
   route,
@@ -92,7 +93,7 @@ export function DeliveryDetailPage({
   }, [paymentCaseId]);
   useEffect(() => {
     const messageStatus = job?.messages?.[0]?.status;
-    if (!job || ['delivered', 'read', 'failed', 'cancelled'].includes(messageStatus ?? job.status)) return;
+    if (!job || ['read', 'failed', 'cancelled'].includes(messageStatus ?? job.status)) return;
     const interval = window.setInterval(() => void load(true), 2500);
     return () => window.clearInterval(interval);
   }, [job, load]);
@@ -188,12 +189,12 @@ export function DeliveryDetailPage({
 
           <ol className="ds-steps" aria-label="Journey">
             {journey.map((step) => (
-              <li key={step.key} className={`ds-step ds-step--${step.state}`}>
+              <li key={step.key} className={`ds-step ds-step--${step.state}${step.key === 'read' ? ' ds-step--read' : ''}`}>
                 <span className="ds-step__dot">
                   {step.state === 'done' ? <Check size={12} strokeWidth={3} /> : step.state === 'failed' ? <AlertCircle size={13} strokeWidth={2.6} /> : null}
                 </span>
                 <strong>{step.label}</strong>
-                <small>{step.time ? formatDateTime(step.time) : step.state === 'current' ? 'Waiting…' : step.state === 'failed' ? 'Stopped' : '—'}</small>
+                <small>{step.time ? formatDateTime(step.time) : step.note ?? (step.state === 'current' ? 'Waiting…' : step.state === 'failed' ? 'Stopped' : '—')}</small>
               </li>
             ))}
           </ol>
@@ -281,6 +282,8 @@ export function DeliveryDetailPage({
               <div><dt>Message format</dt><dd className="mono">{job.communication_templates?.name ?? job.metadata?.template_name ?? '—'}</dd></div>
               <div><dt>WhatsApp message ID</dt><dd className="mono">{message?.provider_message_id ?? '—'}</dd></div>
               <div><dt>Send attempts</dt><dd>{attempts.length} of {job.max_attempts}</dd></div>
+              <div><dt>Delivered</dt><dd>{formatDateTime(message?.delivered_at)}</dd></div>
+              <div><dt>Read receipt</dt><dd>{message?.read_at ? formatDateTime(message.read_at) : message?.delivered_at ? 'Not confirmed' : '—'}</dd></div>
               <div><dt>Created</dt><dd>{formatDateTime(job.created_at)}</dd></div>
             </dl>
           </details>
@@ -301,8 +304,10 @@ const TYPE_EXPLAINER: Record<string, string> = {
 function summarize(stage: Stage, who: string, label: string, phone: string | undefined, message: DeliveryMessage | undefined, createdAt?: string) {
   const to = phone ? ` on ${phone}` : '';
   switch (stage) {
+    case 'read':
+      return { title: `${who} read this ${label}`, detail: `WhatsApp confirmed it was read${to} ${when(message?.read_at ?? message?.delivered_at)}.` };
     case 'delivered':
-      return { title: `${who} received this ${label}`, detail: `Delivered on WhatsApp${to} ${when(message?.delivered_at ?? message?.sent_at)}.` };
+      return { title: `${who} received this ${label}`, detail: `Delivered on WhatsApp${to} ${when(message?.delivered_at ?? message?.sent_at)}. Read not confirmed; the customer may have read receipts turned off.` };
     case 'sent':
       return { title: `Sent to ${who}`, detail: `Sent on WhatsApp${to} ${when(message?.sent_at)}. Waiting for it to reach their phone.` };
     case 'failed':
@@ -326,15 +331,16 @@ function nextStepText(stage: Stage, paymentCase: PaymentFollowUpCase | null): st
   return receivable?.due_date ? `Payment is due ${formatDate(receivable.due_date)}.` : null;
 }
 
-type JourneyStep = { key: string; label: string; time?: string | null; state: 'done' | 'current' | 'upcoming' | 'failed' };
+type JourneyStep = { key: string; label: string; time?: string | null; note?: string; state: 'done' | 'current' | 'upcoming' | 'failed' };
 
 function journeySteps(job: DeliveryJobDetail, message: DeliveryMessage | undefined, stage: Stage, paymentCase: PaymentFollowUpCase | null): JourneyStep[] {
-  const order: Stage[] = ['queued', 'sent', 'delivered'];
+  const order: Stage[] = ['queued', 'sent', 'delivered', 'read'];
   const reached = stage === 'failed' ? (message?.sent_at ? 1 : 0) : order.indexOf(stage);
   const steps: JourneyStep[] = [
     { key: 'created', label: 'Created in SAP', time: job.created_at ?? job.scheduled_at, state: 'done' },
     { key: 'sent', label: 'Sent', time: message?.sent_at, state: reached >= 1 ? 'done' : 'upcoming' },
     { key: 'delivered', label: 'Delivered', time: message?.delivered_at, state: reached >= 2 ? 'done' : 'upcoming' },
+    { key: 'read', label: reached >= 3 ? 'Read' : 'Read not confirmed', time: message?.read_at, note: reached === 2 ? 'No receipt yet' : undefined, state: reached >= 3 ? 'done' : 'upcoming' },
   ];
   if (stage === 'failed') {
     steps[reached + 1] = { key: 'failed', label: 'Not delivered', time: message?.failed_at ?? job.completed_at, state: 'failed' };
@@ -346,7 +352,7 @@ function journeySteps(job: DeliveryJobDetail, message: DeliveryMessage | undefin
     steps.push({ key: 'paid', label: 'Paid', time: paid ? paymentCase.resolved_at ?? receivable?.last_synced_at : null, state: paid ? 'done' : 'upcoming' });
   }
   const next = steps.find((step) => step.state === 'upcoming');
-  if (next && (next.key === 'sent' || next.key === 'delivered')) next.state = 'current';
+  if (next && (next.key === 'sent' || next.key === 'delivered' || next.key === 'read')) next.state = 'current';
   return steps;
 }
 
@@ -402,12 +408,8 @@ function PaymentPanel({ paymentCase, onOpen }: { paymentCase: PaymentFollowUpCas
 }
 
 function stageOf(job: DeliveryJobDetail, message?: DeliveryMessage): Stage {
-  const status = (message?.status ?? job.status).toLowerCase();
-  if (status === 'failed' || status === 'cancelled' || job.status === 'failed') return 'failed';
-  if (status === 'read') return 'delivered';
-  if (status === 'delivered' || message?.delivered_at) return 'delivered';
-  if (status === 'sent' || message?.sent_at) return 'sent';
-  return 'queued';
+  if (job.status === 'failed') return 'failed';
+  return messageLifecycleState(message?.status ?? job.status, message);
 }
 
 function StageIcon({ stage, size }: { stage: Stage; size: number }) {
@@ -421,7 +423,8 @@ function MessageTicks({ stage }: { stage: Stage }) {
   if (stage === 'failed') return <AlertCircle className="dt-ticks dt-ticks--failed" size={13} aria-label="Failed" />;
   if (stage === 'queued') return <Clock3 className="dt-ticks" size={12} aria-label="Queued" />;
   if (stage === 'sent') return <Check className="dt-ticks" size={14} aria-label="Sent" />;
-  return <CheckCheck className="dt-ticks" size={14} aria-label="Delivered" />;
+  if (stage === 'read') return <CheckCheck className="dt-ticks dt-ticks--read" size={14} aria-label="Read" />;
+  return <CheckCheck className="dt-ticks" size={14} aria-label="Delivered; read not confirmed" />;
 }
 
 function preserveDocumentUrls(

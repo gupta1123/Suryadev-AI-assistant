@@ -29,6 +29,7 @@ import {
   getDeliveryJob,
   getSapPollingStatus,
   listDeliveryJobs,
+  listDeliveryJobsFilteredPage,
   listDeliveryJobsPage,
   persistInvoiceAndEnqueue,
   retryDeliveryJob,
@@ -62,6 +63,12 @@ const listSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
   beforeId: z.coerce.number().int().positive().optional(),
   paginated: z.literal('true').optional(),
+  page: z.coerce.number().int().positive().optional(),
+  pageSize: z.coerce.number().int().min(1).max(100).default(10),
+  search: z.string().trim().max(100).optional(),
+  status: z.enum(['queued', 'sent', 'delivered', 'read', 'failed']).optional(),
+  documentType: z.enum(SUPPORTED_BILLING_DOCUMENT_TYPES).optional(),
+  rangeDays: z.coerce.number().int().refine((value) => [1, 7, 30, 90].includes(value)).optional(),
 });
 
 const helpRequestListSchema = z.object({
@@ -376,13 +383,26 @@ invoiceDeliveryRouter.get(
   asyncHandler(async (request, response) => {
     const input = listSchema.parse(request.query);
     if (!isSupabaseServiceConfigured) {
-      response.json({ data: [] });
+      response.json({
+        data: input.page
+          ? { items: [], page: input.page, pageSize: input.pageSize, total: 0, pageCount: 1 }
+          : [],
+      });
       return;
     }
     response.json({
-      data: input.paginated
-        ? await listDeliveryJobsPage(input.limit, input.beforeId)
-        : await listDeliveryJobs(input.limit, input.beforeId),
+      data: input.page
+        ? await listDeliveryJobsFilteredPage({
+            page: input.page,
+            pageSize: input.pageSize,
+            ...(input.search ? { search: input.search } : {}),
+            ...(input.status ? { status: input.status } : {}),
+            ...(input.documentType ? { documentType: input.documentType } : {}),
+            ...(input.rangeDays ? { rangeDays: input.rangeDays } : {}),
+          })
+        : input.paginated
+          ? await listDeliveryJobsPage(input.limit, input.beforeId)
+          : await listDeliveryJobs(input.limit, input.beforeId),
     });
   }),
 );

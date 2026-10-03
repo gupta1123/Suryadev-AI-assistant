@@ -15,11 +15,16 @@ export function Modal({
   width?: 'medium' | 'large';
 }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     closeButtonRef.current?.focus();
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') onCloseRef.current();
     }
     document.addEventListener('keydown', closeOnEscape);
     document.body.classList.add('modal-open');
@@ -27,7 +32,7 @@ export function Modal({
       document.removeEventListener('keydown', closeOnEscape);
       document.body.classList.remove('modal-open');
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>

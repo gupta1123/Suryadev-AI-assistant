@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, CircleDot, Clock3, type LucideIcon } from 'lucide-react';
+import { AlertCircle, Check, CheckCheck, CheckCircle2, CircleDot, Clock3, type LucideIcon } from 'lucide-react';
 
 // Help-request lifecycle states get their own tones so open work stands out from finished work.
 const HELP_TONES: Record<string, { tone: string; icon: LucideIcon; label: string }> = {
@@ -20,11 +20,38 @@ export function StatusBadge({ status }: { status: string }) {
     );
   }
 
-  const success = ['completed', 'sent', 'delivered', 'read', 'ready', 'succeeded'].includes(normalized);
+  if (normalized === 'read') {
+    return (
+      <span className="status-badge status-badge--read">
+        <CheckCheck size={13} aria-hidden="true" />
+        Read
+      </span>
+    );
+  }
+
+  if (normalized === 'delivered') {
+    return (
+      <span className="status-badge status-badge--delivered">
+        <CheckCheck size={13} aria-hidden="true" />
+        Delivered
+      </span>
+    );
+  }
+
+  if (normalized === 'sent') {
+    return (
+      <span className="status-badge status-badge--sent">
+        <Check size={13} aria-hidden="true" />
+        Sent
+      </span>
+    );
+  }
+
+  const success = ['completed', 'ready', 'succeeded'].includes(normalized);
   const danger = ['failed', 'blocked', 'cancelled', 'rejected'].includes(normalized);
   const Icon = success ? CheckCircle2 : danger ? AlertCircle : Clock3;
   const tone = success ? 'success' : danger ? 'danger' : 'pending';
-  const label = normalized === 'read' ? 'Delivered' : status.replaceAll('_', ' ');
+  const label = status.replaceAll('_', ' ');
 
   return (
     <span className={`status-badge status-badge--${tone}`}>

@@ -41,6 +41,10 @@ const envSchema = z.object({
   MSG91_DEBIT_MEMO_TEMPLATE_NAME: z.string().min(1).default('share_debit_memo'),
   MSG91_TEMPLATE_LANGUAGE: z.string().min(1).default('en'),
   MSG91_TEMPLATE_TEAM_NAME: z.string().min(1).default('SuryaDev'),
+  MSG91_HELP_REQUEST_ALERT_ENABLED: z.enum(['true', 'false']).default('true').transform((value) => value === 'true'),
+  MSG91_HELP_REQUEST_TEMPLATE_NAME: z.string().min(1).default('invoice_help_request_alert_v1'),
+  MSG91_HELP_REQUEST_TEMPLATE_LANGUAGE: z.string().min(1).default('en'),
+  MSG91_HELP_REQUEST_ALERT_RECIPIENT: z.string().default('917019339764'),
   MSG91_WEBHOOK_SECRET: z.string().min(16).optional(),
   MSG91_STATUS_POLL_ENABLED: z.enum(['true', 'false']).default('true').transform((value) => value === 'true'),
   MSG91_STATUS_POLL_INTERVAL_MS: z.coerce.number().int().min(5000).max(300000).default(15000),
@@ -118,6 +122,18 @@ export function isSapTestDocumentAllowed(
 
 export const isMsg91Configured = Boolean(
   env.MSG91_AUTHKEY && digitsOnly(env.MSG91_INTEGRATED_NUMBER),
+);
+
+export const helpRequestAlertRecipient = digitsOnly(
+  env.MSG91_HELP_REQUEST_ALERT_RECIPIENT,
+);
+
+export const isHelpRequestAlertConfigured = Boolean(
+  env.MSG91_HELP_REQUEST_ALERT_ENABLED &&
+    isMsg91Configured &&
+    env.MSG91_SEND_ENABLED &&
+    helpRequestAlertRecipient &&
+    (env.DELIVERY_MODE !== 'test' || whatsappTestRecipients.has(helpRequestAlertRecipient)),
 );
 
 export const isInvoiceDeliveryRuntimeConfigured = Boolean(

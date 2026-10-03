@@ -239,15 +239,25 @@ function PaymentCasesTable({
   return (
     <div className="table-scroll">
       <table>
-        <thead><tr><th>Customer</th><th>Invoice</th><th>Amount due</th><th>Due date</th><th>Last reminder</th><th aria-label="Open" /></tr></thead>
+        <thead><tr><th>Customer</th><th>Invoice</th><th>Payment</th><th>Due date</th><th>Last reminder</th><th aria-label="Open" /></tr></thead>
         <tbody>
           {cases.map((paymentCase) => {
             const status = reminderStatus(paymentCase);
+            const settled = isSettled(paymentCase);
+            const confirmation = paymentCase.receivable?.raw_data?.payment_confirmation;
+            const paymentDate = confirmation?.payment_date ?? confirmation?.confirmed_at;
+            const paymentSummary = [
+              paymentDate ? formatDate(paymentDate) : '',
+              confirmation?.payment_method ? humanize(confirmation.payment_method) : '',
+            ].filter(Boolean).join(' · ');
             return (
               <tr key={paymentCase.id}>
                 <td><strong>{paymentCase.customer?.display_name ?? 'Customer unavailable'}</strong><small>{paymentCase.customer?.sap_customer_number ?? '—'}</small></td>
                 <td><span className="invoice-number">{paymentCase.invoice?.sap_billing_document ?? '—'}</span><small>{formatDate(paymentCase.invoice?.billing_document_date)}</small></td>
-                <td><strong>{formatCurrency(Number(paymentCase.receivable?.outstanding_amount ?? 0), paymentCase.receivable?.currency)}</strong><small>{paymentCase.receivable?.payment_status.replaceAll('_', ' ') ?? '—'}</small></td>
+                <td>
+                  <strong>{formatCurrency(Number(settled ? paymentCase.receivable?.paid_amount ?? 0 : paymentCase.receivable?.outstanding_amount ?? 0), paymentCase.receivable?.currency)}</strong>
+                  <small>{settled ? `Paid${paymentSummary ? ` · ${paymentSummary}` : ''}` : paymentCase.receivable?.payment_status.replaceAll('_', ' ') ?? '—'}</small>
+                </td>
                 <td>{formatDate(paymentCase.receivable?.due_date)}<small>{latenessLabel(paymentCase)}</small></td>
                 <td><StatusBadge status={status} /><small>{formatDateTime(paymentCase.last_reminder_at)}</small></td>
                 <td><button className="row-open-button" type="button" onClick={() => onOpen(paymentCase.id)} aria-label="Open payment case"><ChevronRight size={16} /></button></td>

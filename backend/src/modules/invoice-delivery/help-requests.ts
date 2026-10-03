@@ -1,4 +1,6 @@
 import { getSupabaseServerClient } from '../../lib/supabase.js';
+import { enqueueHelpRequestAlert } from './help-alerts.js';
+import { processHelpRequestAlertQueue } from './help-alert-worker.js';
 
 export type InvoiceResponseType = 'received' | 'needs_help';
 
@@ -186,6 +188,13 @@ export async function processMsg91InvoiceButtonResponse(input: {
     .maybeSingle();
   if (existingTaskError) throw new Error(existingTaskError.message);
   if (existingTask) {
+    await enqueueHelpRequestAlert({
+      reviewTaskId: Number(existingTask.id),
+      customerId: Number(job.customer_id),
+      invoiceId: Number(job.primary_invoice_id),
+      requestedAt: parsed.receivedAt,
+    });
+    setImmediate(() => void processHelpRequestAlertQueue());
     return { matched: true, responseType: parsed.responseType, helpRequestId: existingTask.id };
   }
 
@@ -205,6 +214,14 @@ export async function processMsg91InvoiceButtonResponse(input: {
     .select('id')
     .single();
   if (taskError || !task) throw new Error(taskError?.message ?? 'Unable to create invoice help request');
+
+  await enqueueHelpRequestAlert({
+    reviewTaskId: Number(task.id),
+    customerId: Number(job.customer_id),
+    invoiceId: Number(job.primary_invoice_id),
+    requestedAt: parsed.receivedAt,
+  });
+  setImmediate(() => void processHelpRequestAlertQueue());
 
   return { matched: true, responseType: parsed.responseType, helpRequestId: task.id };
 }

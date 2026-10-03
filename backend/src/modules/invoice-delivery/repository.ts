@@ -184,6 +184,155 @@ export type CursorPage<T> = {
   nextCursor: number | null;
 };
 
+export type DeliveryLifecycleFilter = 'queued' | 'sent' | 'delivered' | 'read' | 'failed';
+
+export type DeliveryListFilters = {
+  page: number;
+  pageSize: number;
+  search?: string;
+  status?: DeliveryLifecycleFilter;
+  documentType?: string;
+  rangeDays?: number;
+};
+
+export type DeliveryOffsetPage<T> = {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
+  pageCount: number;
+};
+
+/**
+ * Server-filtered delivery history. The lifecycle filters are evaluated against
+ * provider message evidence, so "delivered" means delivered_at exists while
+ * read_at does not. This keeps filtering correct beyond the browser's current page.
+ */
+export async function listDeliveryJobsFilteredPage(
+  input: DeliveryListFilters,
+): Promise<DeliveryOffsetPage<unknown>> {
+  const client = getSupabaseServerClient();
+  const pageSize = Math.min(Math.max(input.pageSize, 1), 100);
+  const page = Math.max(input.page, 1);
+  const messageInnerJoin = ['sent', 'delivered', 'read'].includes(input.status ?? '');
+  const invoiceInnerJoin = Boolean(input.documentType);
+  const selectColumns = [
+    'id,job_type,status,attempt_count,max_attempts,scheduled_at,completed_at,created_at,customer_id,primary_invoice_id,last_error,metadata',
+    'customers(id,display_name,sap_customer_number)',
+    `invoices!communication_jobs_primary_invoice_id_fkey${invoiceInnerJoin ? '!inner' : ''}(sap_billing_document,billing_document_type,billing_document_date,transaction_currency,total_gross_amount)`,
+    `messages${messageInnerJoin ? '!inner' : ''}(id,status,provider_message_id,sent_at,delivered_at,read_at,failed_at)`,
+  ].join(',');
+
+  let query = client
+    .from('communication_jobs')
+    .select(selectColumns, { count: 'exact' })
+    .in('job_type', ['invoice_delivery', 'manual_resend']);
+
+  if (input.documentType) {
+    query = query.eq('invoices.billing_document_type', input.documentType.toUpperCase());
+  }
+  if (input.rangeDays) {
+    query = query.gte('created_at', startOfIndiaDateRange(input.rangeDays));
+  }
+  if (input.search?.trim()) {
+    const matches = await findDeliverySearchMatches(client, input.search.trim());
+    if (matches.length === 0) {
+      return { items: [], page, pageSize, total: 0, pageCount: 1 };
+    }
+    query = query.or(matches.join(','));
+  }
+
+  switch (input.status) {
+    case 'read':
+      query = query.or('status.eq.read,read_at.not.is.null', { referencedTable: 'messages' });
+      break;
+    case 'delivered':
+      query = query
+        .is('messages.read_at', null)
+        .neq('messages.status', 'read')
+        .or('status.eq.delivered,delivered_at.not.is.null', { referencedTable: 'messages' });
+      break;
+    case 'sent':
+      query = query
+        .is('messages.read_at', null)
+        .is('messages.delivered_at', null)
+        .neq('messages.status', 'read')
+        .neq('messages.status', 'delivered')
+        .or('status.eq.sent,sent_at.not.is.null', { referencedTable: 'messages' });
+      break;
+    case 'failed':
+      query = query.eq('status', 'failed');
+      break;
+    case 'queued':
+      query = query.in('status', ['queued', 'processing']);
+      break;
+  }
+
+  const start = (page - 1) * pageSize;
+  const { data, error, count } = await query
+    .order('id', { ascending: false })
+    .range(start, start + pageSize - 1);
+  if (error) throw new HttpError(500, 'Unable to filter delivery history', error.message);
+
+  const total = count ?? 0;
+  const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
+  return {
+    items: rows.map(sanitizeJobForApi),
+    page,
+    pageSize,
+    total,
+    pageCount: Math.max(1, Math.ceil(total / pageSize)),
+  };
+}
+
+async function findDeliverySearchMatches(
+  client: SupabaseClient,
+  search: string,
+): Promise<string[]> {
+  const pattern = `%${escapeLikePattern(search)}%`;
+  const digits = search.replace(/\D/g, '');
+  const [customerNames, customerNumbers, invoiceNumbers, contactNumbers] = await Promise.all([
+    client.from('customers').select('id').ilike('display_name', pattern).limit(1000),
+    client.from('customers').select('id').ilike('sap_customer_number', pattern).limit(1000),
+    client.from('invoices').select('id').ilike('sap_billing_document', pattern).limit(1000),
+    digits.length >= 3
+      ? client.from('customer_contacts').select('customer_id').ilike('normalized_value', `%${digits}%`).limit(1000)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  const firstError = [customerNames.error, customerNumbers.error, invoiceNumbers.error, contactNumbers.error]
+    .find(Boolean);
+  if (firstError) throw new HttpError(500, 'Unable to search delivery history', firstError.message);
+
+  const customerIds = new Set<number>();
+  for (const row of [...(customerNames.data ?? []), ...(customerNumbers.data ?? [])]) {
+    customerIds.add(Number(row.id));
+  }
+  for (const row of contactNumbers.data ?? []) customerIds.add(Number(row.customer_id));
+  const invoiceIds = new Set((invoiceNumbers.data ?? []).map((row) => Number(row.id)));
+  const filters: string[] = [];
+  if (/^\d+$/.test(search)) filters.push(`id.eq.${Number(search)}`);
+  if (customerIds.size > 0) filters.push(`customer_id.in.(${[...customerIds].join(',')})`);
+  if (invoiceIds.size > 0) filters.push(`primary_invoice_id.in.(${[...invoiceIds].join(',')})`);
+  return filters;
+}
+
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (character) => `\\${character}`);
+}
+
+function startOfIndiaDateRange(days: number, now = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const start = new Date(`${value.year}-${value.month}-${value.day}T00:00:00+05:30`);
+  start.setUTCDate(start.getUTCDate() - (days - 1));
+  return start.toISOString();
+}
+
 export async function listDeliveryJobsPage(
   limit = 50,
   beforeId?: number,
@@ -954,6 +1103,19 @@ async function upsertContact(
     .eq('normalized_value', candidate.contact.normalizedValue)
     .maybeSingle();
   if (lookupError) throw new Error(lookupError.message);
+
+  const { data: currentPrimary, error: primaryLookupError } = candidate.contact.isPrimary
+    ? await client
+      .from('customer_contacts')
+      .select('id')
+      .eq('customer_id', customerId)
+      .eq('channel', 'whatsapp')
+      .eq('is_primary', true)
+      .eq('is_active', true)
+      .maybeSingle()
+    : { data: null, error: null };
+  if (primaryLookupError) throw new Error(primaryLookupError.message);
+
   const values = {
     customer_id: customerId,
     channel: 'whatsapp',
@@ -967,12 +1129,31 @@ async function upsertContact(
     raw_data: candidate.contact.rawData,
   };
   if (existing) {
+    if (currentPrimary && Number(currentPrimary.id) !== Number(existing.id)) {
+      await ensureUpdate(
+        client
+          .from('customer_contacts')
+          .update({ is_primary: false })
+          .eq('id', currentPrimary.id),
+      );
+    }
     const row = await requiredSingle(
       client.from('customer_contacts').update(values).eq('id', existing.id).select('id').single(),
       'Unable to update invoice contact',
     );
     return Number(row.id);
   }
+
+  // SAP and controlled tests can replace a customer's primary WhatsApp number.
+  // Reuse that primary row so the partial unique index does not reject the sync.
+  if (currentPrimary) {
+    const row = await requiredSingle(
+      client.from('customer_contacts').update(values).eq('id', currentPrimary.id).select('id').single(),
+      'Unable to update invoice contact',
+    );
+    return Number(row.id);
+  }
+
   const row = await requiredSingle(
     client.from('customer_contacts').insert(values).select('id').single(),
     'Unable to create invoice contact',

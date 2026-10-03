@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
-import { env } from '../config/env.js';
 import { HttpError } from '../lib/http.js';
+import { isTrustedRequestOrigin } from '../lib/origin.js';
 import {
   type AdminUser,
   getAdminSession,
@@ -42,7 +42,7 @@ export function requireAdmin(
 function validateRequestOrigin(request: Request): void {
   if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return;
   const origin = request.header('origin');
-  if (origin && origin !== env.FRONTEND_ORIGIN) {
+  if (!isTrustedRequestOrigin(origin)) {
     throw new HttpError(403, 'Request origin is not allowed');
   }
 }

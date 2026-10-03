@@ -17,6 +17,7 @@ import { AppShell } from '../components/AppShell';
 import { apiRequest } from '../lib/api';
 import { loadInbox, type InboxItem } from '../lib/inbox';
 import { formatCurrency, toMessage } from '../lib/format';
+import { messageLifecycleState, type MessageLifecycleState } from '../lib/message-status';
 import {
   relationOne,
   type AdminUser,
@@ -31,14 +32,15 @@ import {
 
 const VOLUME_DAYS = 14;
 
-type TickState = 'queued' | 'sent' | 'delivered' | 'failed';
+type TickState = MessageLifecycleState;
 type HelpSnapshot = { open: number; inProgress: number; resolved: number };
 type AutomationState = 'live' | 'test' | 'paused' | 'off';
 
 const TICKS: Array<{ key: TickState; label: string; icon: LucideIcon; hint: string }> = [
   { key: 'queued', label: 'Queued', icon: Clock3, hint: 'Waiting to send' },
   { key: 'sent', label: 'Sent', icon: Check, hint: 'Accepted by WhatsApp' },
-  { key: 'delivered', label: 'Delivered', icon: CheckCheck, hint: 'On the customer’s phone' },
+  { key: 'delivered', label: 'Delivered', icon: CheckCheck, hint: 'On phone · read not confirmed' },
+  { key: 'read', label: 'Read', icon: CheckCheck, hint: 'Confirmed by WhatsApp' },
   { key: 'failed', label: 'Failed', icon: AlertCircle, hint: 'Not delivered' },
 ];
 
@@ -88,6 +90,8 @@ export function OverviewPage({
   useEffect(() => {
     void load();
     loadInbox().then(setInbox).catch(() => setInbox([]));
+    const interval = window.setInterval(() => void load(), 15_000);
+    return () => window.clearInterval(interval);
   }, [load]);
 
   const messages = useMemo(() => messageStats(jobs), [jobs]);
@@ -165,8 +169,8 @@ export function OverviewPage({
               action="Send it to the customer on WhatsApp"
               state={billingState}
               stats={[
-                { label: 'Sent', value: String(messages.counts.sent + messages.counts.delivered) },
-                { label: 'Delivered', value: messages.total ? `${pct(messages.counts.delivered, messages.total)}%` : '—' },
+                { label: 'Delivered', value: messages.total ? `${pct(messages.counts.delivered + messages.counts.read, messages.total)}%` : '—' },
+                { label: 'Read', value: messages.total ? `${pct(messages.counts.read, messages.total)}%` : '—' },
               ]}
               onOpen={() => onNavigate('/documents')}
             />
@@ -260,8 +264,9 @@ export function OverviewPage({
           </header>
           <ul className="wa-types__list">
             {documentTypes.map((documentType) => {
-              const typeStats = messages.byType[documentType.type] ?? { total: 0, delivered: 0, failed: 0 };
+              const typeStats = messages.byType[documentType.type] ?? { total: 0, delivered: 0, read: 0, failed: 0 };
               const share = typeStats.total ? Math.round((typeStats.delivered / typeStats.total) * 100) : 0;
+              const readShare = typeStats.total ? Math.round((typeStats.read / typeStats.total) * 100) : 0;
               return (
                 <li key={documentType.type}>
                   <span className="document-type-code">{documentType.type}</span>
@@ -271,7 +276,7 @@ export function OverviewPage({
                       <b>{typeStats.total}</b>
                     </span>
                     <span className="wa-types__track"><span style={{ width: `${share}%` }} /></span>
-                    <small>{typeStats.total ? `${share}% delivered${typeStats.failed ? ` · ${typeStats.failed} not delivered` : ''}` : 'None sent yet'}</small>
+                    <small>{typeStats.total ? `${share}% delivered · ${readShare}% read${typeStats.failed ? ` · ${typeStats.failed} not delivered` : ''}` : 'None sent yet'}</small>
                   </span>
                 </li>
               );
@@ -337,16 +342,12 @@ function dayKey(date: Date): string {
 
 function tickState(job: DeliveryJob): TickState {
   const message = relationOne(job.messages);
-  const status = (message?.status ?? job.status).toLowerCase();
-  if (status === 'failed') return 'failed';
-  if (status === 'read' || status === 'delivered' || message?.read_at || message?.delivered_at) return 'delivered';
-  if (status === 'sent') return 'sent';
-  return 'queued';
+  return messageLifecycleState(message?.status ?? job.status, message);
 }
 
 function messageStats(jobs: DeliveryJob[]) {
-  const counts: Record<TickState, number> = { queued: 0, sent: 0, delivered: 0, failed: 0 };
-  const byType: Record<string, { total: number; delivered: number; failed: number }> = {};
+  const counts: Record<TickState, number> = { queued: 0, sent: 0, delivered: 0, read: 0, failed: 0 };
+  const byType: Record<string, { total: number; delivered: number; read: number; failed: number }> = {};
   const failedJobs: DeliveryJob[] = [];
   for (const job of jobs) {
     const state = tickState(job);
@@ -354,9 +355,10 @@ function messageStats(jobs: DeliveryJob[]) {
     if (state === 'failed') failedJobs.push(job);
     const type = (relationOne(job.invoices)?.billing_document_type ?? job.metadata?.billing_document_type ?? '').toUpperCase();
     if (type) {
-      const entry = (byType[type] ??= { total: 0, delivered: 0, failed: 0 });
+      const entry = (byType[type] ??= { total: 0, delivered: 0, read: 0, failed: 0 });
       entry.total += 1;
-      if (state === 'delivered') entry.delivered += 1;
+      if (state === 'delivered' || state === 'read') entry.delivered += 1;
+      if (state === 'read') entry.read += 1;
       if (state === 'failed') entry.failed += 1;
     }
   }

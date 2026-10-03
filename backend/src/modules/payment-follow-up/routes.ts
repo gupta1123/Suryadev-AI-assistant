@@ -24,6 +24,7 @@ import {
 } from './settings.js';
 import { persistControlledInvoiceResendAndEnqueue } from '../invoice-delivery/repository.js';
 import { processDeliveryQueue } from '../invoice-delivery/worker.js';
+import { paymentDetailsSchema } from './payment-details.js';
 
 const caseIdSchema = z.coerce.number().int().positive();
 
@@ -160,10 +161,12 @@ paymentFollowUpRouter.post(
   '/cases/:caseId/mark-paid',
   asyncHandler(async (request: AuthenticatedRequest, response) => {
     const caseId = caseIdSchema.parse(request.params.caseId);
+    const paymentDetails = paymentDetailsSchema.parse(request.body ?? {});
     response.json({
       data: await markPaymentCasePaid(
         caseId,
         request.auth ? { id: request.auth.userId, username: request.auth.user.username } : undefined,
+        paymentDetails,
       ),
     });
   }),

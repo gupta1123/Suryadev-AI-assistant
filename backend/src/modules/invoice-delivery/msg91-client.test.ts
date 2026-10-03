@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   buildMsg91InvoicePayload,
+  buildMsg91HelpRequestAlertPayload,
   buildMsg91PaymentReminderPayload,
   sanitizeMsg91Payload,
 } from './msg91-client.js';
@@ -77,6 +78,33 @@ describe('MSG91 invoice template payload', () => {
     assert.equal(components.body_1?.value, 'Customer One');
     assert.equal(components.body_5?.value, 'SuryaDev');
     assert.equal(components.body_var_1, undefined);
+    assert.equal(Object.keys(components).some((key) => key.toLowerCase().includes('button')), false);
+  });
+});
+
+describe('MSG91 help request alert payload', () => {
+  it('sends the dashboard help details to the configured team number without buttons', () => {
+    const payload = buildMsg91HelpRequestAlertPayload({
+      recipient: '917019339764',
+      templateName: 'invoice_help_request_alert_v1',
+      templateLanguage: 'en',
+      customerName: 'Agarwal Coal',
+      customerNumber: '550044',
+      billingDocument: '0090000042',
+      billingDocumentDate: '3 Oct 2026',
+      formattedAmount: 'INR 12,992.00',
+      requestedAt: '3 Oct 2026, 3:15 pm',
+    });
+    const template = (payload.payload as Record<string, unknown>)
+      .template as Record<string, unknown>;
+    const target = (template.to_and_components as Record<string, unknown>[])[0]!;
+    const components = target.components as Record<string, Record<string, unknown>>;
+
+    assert.deepEqual(target.to, ['917019339764']);
+    assert.equal(template.name, 'invoice_help_request_alert_v1');
+    assert.equal(components.body_1?.value, 'Agarwal Coal');
+    assert.equal(components.body_3?.value, '0090000042');
+    assert.equal(components.body_6?.value, '3 Oct 2026, 3:15 pm');
     assert.equal(Object.keys(components).some((key) => key.toLowerCase().includes('button')), false);
   });
 });

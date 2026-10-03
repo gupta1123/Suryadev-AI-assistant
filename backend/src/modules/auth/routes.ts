@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { env } from '../../config/env.js';
 import { asyncHandler, HttpError } from '../../lib/http.js';
+import { isTrustedRequestOrigin } from '../../lib/origin.js';
 import {
   type AuthenticatedRequest,
   requireAdmin,
@@ -90,7 +91,7 @@ function requireTrustedOrigin(
   next: NextFunction,
 ): void {
   const origin = request.header('origin');
-  if (origin && origin !== env.FRONTEND_ORIGIN) {
+  if (!isTrustedRequestOrigin(origin)) {
     next(new HttpError(403, 'Request origin is not allowed'));
     return;
   }

@@ -19,6 +19,7 @@ import {
 } from './policy.js';
 import { formatPhone } from '../invoice-delivery/policy.js';
 import { auditUserId, getReminderSettings } from './settings.js';
+import { paymentDetailsForStorage, type PaymentDetails } from './payment-details.js';
 
 const TEST_POLICY_NAME = 'Local controlled payment follow-up test';
 const TEST_STAGE_CODE = 'due_today';
@@ -356,7 +357,7 @@ export async function listPaymentCases(): Promise<Record<string, unknown>[]> {
       .in('invoice_id', invoiceIds),
     client
       .from('communication_jobs')
-      .select('id,payment_follow_up_case_id,status,attempt_count,last_error,completed_at,created_at,metadata,messages(id,status,sent_at,delivered_at,failed_at,failure_reason)')
+      .select('id,payment_follow_up_case_id,status,attempt_count,last_error,completed_at,created_at,metadata,messages(id,status,sent_at,delivered_at,read_at,failed_at,failure_reason)')
       .eq('job_type', 'payment_reminder')
       .in('payment_follow_up_case_id', caseIds)
       .order('id', { ascending: false }),
@@ -412,37 +413,75 @@ function inCycle(job: Record<string, unknown>, cycleId: string | undefined): boo
 }
 
 export async function getPaymentCase(caseId: number): Promise<Record<string, unknown>> {
-  const paymentCase = (await listPaymentCases()).find((row) => Number(row.id) === caseId);
+  const client = getSupabaseServerClient();
+  const { data: paymentCase, error: caseError } = await client
+    .from('payment_follow_up_cases')
+    .select('id,invoice_id,status,next_action_at,last_reminder_at,resolved_at,created_at,updated_at')
+    .eq('id', caseId)
+    .maybeSingle();
+  if (caseError) throw new Error(`Unable to load the payment follow-up case: ${caseError.message}`);
   if (!paymentCase) throw new HttpError(404, 'Payment follow-up case not found');
-  const { data: jobs, error } = await getSupabaseServerClient()
-    .from('communication_jobs')
-    .select(
-      'id,status,attempt_count,max_attempts,last_error,completed_at,created_at,metadata,messages(id,status,body,provider_message_id,sent_at,delivered_at,failed_at,failure_reason,message_attempts(id,attempt_number,status,provider_request_id,response_status,error_code,error_message,started_at,finished_at))',
-    )
-    .eq('job_type', 'payment_reminder')
-    .eq('payment_follow_up_case_id', caseId)
-    .order('id', { ascending: false });
-  if (error) throw new Error(`Unable to load payment reminder history: ${error.message}`);
-  const receivable = isRecord(paymentCase.receivable) ? paymentCase.receivable : undefined;
+
+  const invoiceId = Number(paymentCase.invoice_id);
+  const [invoiceResult, receivableResult, jobsResult] = await Promise.all([
+    client
+      .from('invoices')
+      .select('id,sap_billing_document,billing_document_date,transaction_currency,total_gross_amount,sold_to_customer_id')
+      .eq('id', invoiceId)
+      .maybeSingle(),
+    client
+      .from('invoice_receivables')
+      .select('invoice_id,original_amount,outstanding_amount,paid_amount,currency,due_date,payment_status,aging_bucket,days_overdue,last_synced_at,raw_data')
+      .eq('invoice_id', invoiceId)
+      .maybeSingle(),
+    client
+      .from('communication_jobs')
+      .select(
+        'id,status,attempt_count,max_attempts,last_error,completed_at,created_at,metadata,messages(id,status,body,provider_message_id,sent_at,delivered_at,read_at,failed_at,failure_reason,message_attempts(id,attempt_number,status,provider_request_id,response_status,error_code,error_message,started_at,finished_at))',
+      )
+      .eq('job_type', 'payment_reminder')
+      .eq('payment_follow_up_case_id', caseId)
+      .order('id', { ascending: false }),
+  ]);
+  const firstError = invoiceResult.error ?? receivableResult.error ?? jobsResult.error;
+  if (firstError) throw new Error(`Unable to load payment follow-up details: ${firstError.message}`);
+
+  const invoice = invoiceResult.data ?? null;
+  const receivable = receivableResult.data ? withCurrentAging(receivableResult.data) : undefined;
+  const jobs = jobsResult.data ?? [];
   const currentJobs = (jobs ?? []).filter((job) => inCycle(job, currentCycleId(receivable)));
   const rawData = receivable && isRecord(receivable.raw_data) ? receivable.raw_data : {};
-  const invoice = isRecord(paymentCase.invoice) ? paymentCase.invoice : {};
   const running =
     paymentCase.status === 'active' ||
     currentJobs.some((job) => ACTIVE_JOB_STATUSES.includes(String(job.status)));
-  const restartRecipient = running || !receivable
-    ? null
-    : await findRestartRecipient(getSupabaseServerClient(), Number(invoice.sold_to_customer_id), rawData);
+  const customerId = invoice ? Number(invoice.sold_to_customer_id) : 0;
+  const [customerResult, restartRecipient] = await Promise.all([
+    customerId
+      ? client
+        .from('customers')
+        .select('id,sap_customer_number,display_name')
+        .eq('id', customerId)
+        .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    running || !receivable || !customerId
+      ? null
+      : findRestartRecipient(client, customerId, rawData),
+  ]);
+  if (customerResult.error) throw new Error(`Unable to load the payment customer: ${customerResult.error.message}`);
   const sentTo = currentJobs
     .map((job) => (isRecord(job.metadata) ? String(job.metadata.actual_recipient ?? '') : ''))
     .find(Boolean);
-  const whatsappNumber =
+  let whatsappNumber =
     String(rawData.approved_recipient ?? '') ||
     sentTo ||
-    restartRecipient?.recipient ||
-    (await findCustomerWhatsapp(getSupabaseServerClient(), Number(invoice.sold_to_customer_id)));
+    restartRecipient?.recipient || '';
+  if (!whatsappNumber && customerId) whatsappNumber = await findCustomerWhatsapp(client, customerId);
   return {
     ...paymentCase,
+    invoice,
+    customer: customerResult.data ?? null,
+    receivable: receivable ?? null,
+    latestJob: currentJobs[0] ? sanitizeJob(currentJobs[0]) : null,
     jobs: currentJobs.map(sanitizeJob),
     restartable: Boolean(restartRecipient),
     whatsappNumber: whatsappNumber ? formatPhone(whatsappNumber) : null,
@@ -722,6 +761,7 @@ export async function scheduleNextPaymentReminderFromSentAt(
 export async function markPaymentCasePaid(
   caseId: number,
   markedBy?: { id: string; username: string },
+  paymentDetails: PaymentDetails = {},
 ): Promise<Record<string, unknown>> {
   const client = getSupabaseServerClient();
   const { data: paymentCase, error: caseError } = await client
@@ -744,20 +784,23 @@ export async function markPaymentCasePaid(
   if (resolveError) throw new Error(`Unable to stop payment reminders: ${resolveError.message}`);
   if (!resolved) return getPaymentCase(caseId);
 
-  const { data: cancelledJobs, error: cancelError } = await client
-    .from('communication_jobs')
-    .update({ status: 'cancelled', last_error: 'Invoice marked as paid' })
-    .eq('job_type', 'payment_reminder')
-    .eq('payment_follow_up_case_id', caseId)
-    .in('status', ['pending', 'awaiting_approval', 'queued'])
-    .select('id');
+  const [cancelResult, receivableResult] = await Promise.all([
+    client
+      .from('communication_jobs')
+      .update({ status: 'cancelled', last_error: 'Invoice marked as paid' })
+      .eq('job_type', 'payment_reminder')
+      .eq('payment_follow_up_case_id', caseId)
+      .in('status', ['pending', 'awaiting_approval', 'queued'])
+      .select('id'),
+    client
+      .from('invoice_receivables')
+      .select('original_amount,outstanding_amount,currency,due_date,raw_data')
+      .eq('invoice_id', paymentCase.invoice_id)
+      .maybeSingle(),
+  ]);
+  const { data: cancelledJobs, error: cancelError } = cancelResult;
   if (cancelError) throw new Error(`Unable to cancel queued payment reminders: ${cancelError.message}`);
-
-  const { data: receivable, error: receivableError } = await client
-    .from('invoice_receivables')
-    .select('original_amount,outstanding_amount,currency,due_date,raw_data')
-    .eq('invoice_id', paymentCase.invoice_id)
-    .maybeSingle();
+  const { data: receivable, error: receivableError } = receivableResult;
   if (receivableError) throw new Error(`Unable to load the receivable: ${receivableError.message}`);
   if (receivable) {
     const rawData = {
@@ -767,6 +810,7 @@ export async function markPaymentCasePaid(
         marked_by: markedBy?.username ?? null,
         confirmed_at: markedAt,
         outstanding_before: Number(receivable.outstanding_amount),
+        ...paymentDetailsForStorage(paymentDetails),
       },
     };
     const settledValues = {
@@ -793,24 +837,28 @@ export async function markPaymentCasePaid(
     if (snapshotError) throw new Error(`Unable to record the paid snapshot: ${snapshotError.message}`);
   }
 
-  await client.from('audit_logs').insert({
-    actor_type: 'user',
-    actor_user_id: auditUserId(markedBy?.id),
-    action: 'payment_marked_paid',
-    entity_type: 'payment_follow_up_case',
-    entity_id: String(caseId),
-    before_data: {
-      status: paymentCase.status,
-      outstanding_amount: receivable ? Number(receivable.outstanding_amount) : null,
-    },
-    after_data: {
-      status: 'resolved',
-      resolved_at: markedAt,
-      cancelled_reminder_job_ids: (cancelledJobs ?? []).map((job) => Number(job.id)),
-    },
-    metadata: { username: markedBy?.username ?? null },
-  });
-  return getPaymentCase(caseId);
+  const [updatedCase] = await Promise.all([
+    getPaymentCase(caseId),
+    client.from('audit_logs').insert({
+      actor_type: 'user',
+      actor_user_id: auditUserId(markedBy?.id),
+      action: 'payment_marked_paid',
+      entity_type: 'payment_follow_up_case',
+      entity_id: String(caseId),
+      before_data: {
+        status: paymentCase.status,
+        outstanding_amount: receivable ? Number(receivable.outstanding_amount) : null,
+      },
+      after_data: {
+        status: 'resolved',
+        resolved_at: markedAt,
+        cancelled_reminder_job_ids: (cancelledJobs ?? []).map((job) => Number(job.id)),
+        payment_details: paymentDetailsForStorage(paymentDetails),
+      },
+      metadata: { username: markedBy?.username ?? null },
+    }),
+  ]);
+  return updatedCase;
 }
 
 export async function isPaymentCaseResolved(caseId: number): Promise<boolean> {

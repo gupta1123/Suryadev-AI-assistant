@@ -6,7 +6,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     server: {
-      port: 5173,
+      port: 3000,
       proxy: {
         '/api': {
           target: environment.VITE_BACKEND_PROXY_TARGET || 'http://localhost:3000',

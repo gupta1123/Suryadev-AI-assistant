@@ -17,6 +17,10 @@ import {
   stopMsg91StatusPoller,
 } from './modules/invoice-delivery/msg91-status.js';
 import {
+  startHelpRequestAlertWorker,
+  stopHelpRequestAlertWorker,
+} from './modules/invoice-delivery/help-alert-worker.js';
+import {
   startPaymentFollowUpWorker,
   stopPaymentFollowUpWorker,
 } from './modules/payment-follow-up/worker.js';
@@ -33,6 +37,7 @@ if (isSupabaseServiceConfigured) {
   if (isInvoiceDeliveryRuntimeConfigured) startDeliveryWorker();
   startSapInvoicePoller();
   startMsg91StatusPoller();
+  startHelpRequestAlertWorker();
   startPaymentFollowUpWorker();
   startPaymentFollowUpScheduler();
 }
@@ -42,6 +47,7 @@ function shutdown(signal: string) {
   stopDeliveryWorker();
   stopSapInvoicePoller();
   stopMsg91StatusPoller();
+  stopHelpRequestAlertWorker();
   stopPaymentFollowUpScheduler();
   stopPaymentFollowUpWorker();
   server.close((error) => {
