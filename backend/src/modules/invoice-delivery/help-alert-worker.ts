@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import {
   env,
   isHelpRequestAlertConfigured,
-  whatsappTestRecipients,
 } from '../../config/env.js';
 import {
   claimNextHelpRequestAlert,
@@ -47,18 +46,6 @@ export async function processHelpRequestAlertQueue(): Promise<void> {
       if (!notification) break;
 
       try {
-        if (
-          env.DELIVERY_MODE === 'test' &&
-          !whatsappTestRecipients.has(notification.recipient)
-        ) {
-          await markHelpRequestAlertFailed(
-            notification,
-            'Help request alert recipient is not on the WhatsApp test allowlist',
-            true,
-          );
-          continue;
-        }
-
         const approved = await isWhatsappTemplateApproved(
           notification.templateName,
           notification.templateLanguage,

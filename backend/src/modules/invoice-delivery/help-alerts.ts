@@ -1,9 +1,9 @@
 import {
   env,
-  helpRequestAlertRecipient,
 } from '../../config/env.js';
 import { getSupabaseServerClient } from '../../lib/supabase.js';
 import { formatInvoiceAmount, formatInvoiceDate } from './policy.js';
+import { getHelpRequestAlertSettings } from './help-settings.js';
 
 export type HelpRequestAlertDetails = {
   customerName: string;
@@ -33,7 +33,8 @@ export async function enqueueHelpRequestAlert(input: {
   requestedAt: string;
 }): Promise<void> {
   if (!env.MSG91_HELP_REQUEST_ALERT_ENABLED) return;
-  if (!helpRequestAlertRecipient) {
+  const alertSettings = await getHelpRequestAlertSettings();
+  if (!alertSettings.recipient) {
     throw new Error('Help request alert recipient is not configured');
   }
 
@@ -80,7 +81,7 @@ export async function enqueueHelpRequestAlert(input: {
     .upsert(
       {
         review_task_id: input.reviewTaskId,
-        recipient: helpRequestAlertRecipient,
+        recipient: alertSettings.recipient,
         template_name: env.MSG91_HELP_REQUEST_TEMPLATE_NAME,
         template_language: env.MSG91_HELP_REQUEST_TEMPLATE_LANGUAGE,
         details,

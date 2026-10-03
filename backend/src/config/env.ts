@@ -131,9 +131,7 @@ export const helpRequestAlertRecipient = digitsOnly(
 export const isHelpRequestAlertConfigured = Boolean(
   env.MSG91_HELP_REQUEST_ALERT_ENABLED &&
     isMsg91Configured &&
-    env.MSG91_SEND_ENABLED &&
-    helpRequestAlertRecipient &&
-    (env.DELIVERY_MODE !== 'test' || whatsappTestRecipients.has(helpRequestAlertRecipient)),
+    env.MSG91_SEND_ENABLED,
 );
 
 export const isInvoiceDeliveryRuntimeConfigured = Boolean(

@@ -797,11 +797,18 @@ input:focus, select:focus, textarea:focus { border-color: #ea580c; box-shadow: 0
 .set-timing__foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .set-timing__foot > small { flex: 1 1 240px; color: #8a8278; font-size: .64rem; }
 .set-timing__actions { margin-left: auto; display: flex; gap: 8px; }
+.set-recipient { margin-top: 14px; padding: 16px 18px; display: flex; align-items: flex-end; gap: 16px; border: 1px solid #e7e3dc; border-radius: 12px; background: #fff; }
+.set-recipient__field { min-width: 0; flex: 1 1 auto; }
+.set-recipient__field input { width: 100%; }
+.set-recipient__save { min-height: 38px; display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.set-recipient__save small { max-width: 260px; font-size: .64rem; }
 
 @media (max-width: 960px) {
   .set-layout { grid-template-columns: 1fr; gap: 20px; }
   .set-toc { position: static; flex-direction: row; overflow-x: auto; }
   .set-timing__grid { grid-template-columns: 1fr; }
+  .set-recipient { align-items: stretch; flex-direction: column; }
+  .set-recipient__save { justify-content: space-between; }
   .inbox-item { grid-template-columns: 34px minmax(0, 1fr); }
   .inbox-item__actions { grid-column: 2; }
 }

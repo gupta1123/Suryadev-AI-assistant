@@ -8,6 +8,7 @@ import type {
   AppRoute,
   BillingDocumentTemplateReadiness,
   DeliveryConfig,
+  HelpRequestAlertSettings,
   PaymentFollowUpConfig,
   ReminderSettings,
   SapPollingStatus,
@@ -46,6 +47,7 @@ export function SettingsPage({
 }) {
   const [config, setConfig] = useState<DeliveryConfig | null>(null);
   const [paymentConfig, setPaymentConfig] = useState<PaymentFollowUpConfig | null>(null);
+  const [helpAlertSettings, setHelpAlertSettings] = useState<HelpRequestAlertSettings | null>(null);
   const [polling, setPolling] = useState<SapPollingStatus>(null);
   const [templates, setTemplates] = useState<BillingDocumentTemplateReadiness | null>(null);
   const [checkingTemplates, setCheckingTemplates] = useState(true);
@@ -55,15 +57,18 @@ export function SettingsPage({
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
-    const [configResult, paymentResult, pollingResult] = await Promise.allSettled([
+    const [configResult, paymentResult, pollingResult, helpAlertResult] = await Promise.allSettled([
       apiRequest<DeliveryConfig>('/invoice-delivery/config'),
       apiRequest<PaymentFollowUpConfig>('/payment-follow-up/config'),
       apiRequest<SapPollingStatus>('/invoice-delivery/polling-status'),
+      apiRequest<HelpRequestAlertSettings>('/invoice-delivery/help-alert-settings'),
     ]);
     if (configResult.status === 'fulfilled') setConfig(configResult.value);
     else setError(toMessage(configResult.reason));
     if (paymentResult.status === 'fulfilled') setPaymentConfig(paymentResult.value);
     if (pollingResult.status === 'fulfilled') setPolling(pollingResult.value);
+    if (helpAlertResult.status === 'fulfilled') setHelpAlertSettings(helpAlertResult.value);
+    else setError(toMessage(helpAlertResult.reason));
   }, []);
 
   const checkTemplates = useCallback(async () => {
@@ -149,7 +154,10 @@ export function SettingsPage({
                 <AutomationRow icon={BadgeIndianRupee} name="Payment reminders" detail={paymentConfig ? reminderSummary(paymentConfig.firstReminderDelaySeconds, paymentConfig.repeatReminderDelaySeconds, paymentConfig.maximumTestReminders) : 'Sent after an invoice goes out'} state={paymentState} />
                 <AutomationRow icon={LifeBuoy} name="Customer replies" detail="“Need Help” taps show up in Needs attention" state={helpState} />
               </ul>
-              <p className="set-note">These switches are managed on the server. Ask your admin to change them.</p>
+              {helpAlertSettings
+                ? <HelpAlertRecipientForm key={helpAlertSettings.recipient} settings={helpAlertSettings} onSaved={load} />
+                : <p className="set-note">Loading the Need Help recipient…</p>}
+              <p className="set-note">Automation switches are managed on the server. Ask your admin to change them.</p>
             </SettingsSection>
           )}
 
@@ -236,6 +244,76 @@ export function SettingsPage({
       </div>
     </AppShell>
   );
+}
+
+function HelpAlertRecipientForm({
+  settings,
+  onSaved,
+}: {
+  settings: HelpRequestAlertSettings;
+  onSaved: () => Promise<void>;
+}) {
+  const [recipient, setRecipient] = useState(settings.formattedRecipient || settings.recipient);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
+  const normalized = normalizeRecipient(recipient);
+  const valid = /^[1-9]\d{7,14}$/.test(normalized);
+  const changed = normalized !== settings.recipient;
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    if (!valid || !changed) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const saved = await apiRequest<HelpRequestAlertSettings>('/invoice-delivery/help-alert-settings', {
+        method: 'PUT',
+        body: JSON.stringify({ recipient }),
+      });
+      setRecipient(saved.formattedRecipient);
+      setMessage({ tone: 'ok', text: 'Need Help alerts will go to this number.' });
+      await onSaved();
+    } catch (saveError) {
+      setMessage({ tone: 'error', text: toMessage(saveError) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="set-recipient" onSubmit={(event) => void save(event)}>
+      <label className="field set-recipient__field">
+        <span>Need Help alert number</span>
+        <input
+          type="tel"
+          inputMode="tel"
+          autoComplete="tel"
+          value={recipient}
+          onChange={(event) => {
+            setRecipient(event.target.value);
+            setMessage(null);
+          }}
+          placeholder="+91 70193 39764"
+          aria-describedby="help-alert-number-hint"
+        />
+        <small id="help-alert-number-hint">Customer and invoice details are sent here when a customer taps Need Help.</small>
+      </label>
+      <div className="set-recipient__save">
+        {message && <small className={message.tone === 'error' ? 'text-danger' : 'text-success'}>{message.text}</small>}
+        {!valid && recipient.trim() && <small className="text-danger">Enter a valid WhatsApp number with country code.</small>}
+        <button className="button button--primary" type="submit" disabled={saving || !changed || !valid}>
+          {saving ? 'Saving…' : 'Save number'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function normalizeRecipient(value: string): string {
+  const digits = value.replace(/\D/g, '');
+  if (/^[6-9]\d{9}$/.test(digits)) return `91${digits}`;
+  if (/^0[6-9]\d{9}$/.test(digits)) return `91${digits.slice(1)}`;
+  return digits;
 }
 
 function SettingsSection({ id, title, description, action, children }: { id: string; title: string; description?: string; action?: ReactNode; children: ReactNode }) {

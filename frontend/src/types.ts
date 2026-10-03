@@ -367,6 +367,13 @@ export type ReminderSettings = {
   updatedAt: string | null;
 };
 
+export type HelpRequestAlertSettings = {
+  recipient: string;
+  formattedRecipient: string;
+  source: 'saved' | 'server_default';
+  updatedAt: string | null;
+};
+
 export type PaymentTestPreview = {
   mode: 'controlled_test';
   invoiceSource: 'sap';

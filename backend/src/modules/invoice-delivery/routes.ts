@@ -48,6 +48,11 @@ import {
   listInvoiceHelpRequestsPage,
   updateInvoiceHelpRequestStatus,
 } from './help-requests.js';
+import {
+  getHelpRequestAlertSettings,
+  helpRequestAlertSettingsSchema,
+  saveHelpRequestAlertSettings,
+} from './help-settings.js';
 
 const previewSchema = z.object({
   fixtureId: z.string().min(1),
@@ -134,6 +139,33 @@ invoiceDeliveryRouter.get('/config', (_request, response) => {
     },
   });
 });
+
+invoiceDeliveryRouter.get(
+  '/help-alert-settings',
+  asyncHandler(async (_request, response) => {
+    response.json({ data: await getHelpRequestAlertSettings() });
+  }),
+);
+
+invoiceDeliveryRouter.put(
+  '/help-alert-settings',
+  asyncHandler(async (request: AuthenticatedRequest, response) => {
+    const parsed = helpRequestAlertSettingsSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      throw new HttpError(
+        400,
+        'Need Help recipient is invalid',
+        parsed.error.issues.map((issue) => ({ label: issue.message })),
+      );
+    }
+    response.json({
+      data: await saveHelpRequestAlertSettings(
+        parsed.data,
+        request.auth ? { id: request.auth.userId, username: request.auth.user.username } : undefined,
+      ),
+    });
+  }),
+);
 
 invoiceDeliveryRouter.get(
   '/template-status',
