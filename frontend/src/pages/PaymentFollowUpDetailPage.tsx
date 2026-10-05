@@ -2,7 +2,7 @@ import { AlertCircle, BadgeIndianRupee, BellRing, Check, CircleCheck, Clock3, Ro
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { BackLink } from '../components/BackLink';
-import { Amount, Bubble, Journey, LIFECYCLE_LABEL, PhoneFrame, StatementRow, formatTime, rise, type JourneyItem, type PageTone } from '../components/statement';
+import { Amount, Bubble, Journey, LIFECYCLE_LABEL, PhoneFrame, formatTime, rise, type JourneyItem, type PageTone } from '../components/statement';
 import { Modal } from '../components/Modal';
 import { apiRequest } from '../lib/api';
 import { formatCurrency, formatDate, formatDateTime, toMessage } from '../lib/format';
@@ -299,31 +299,94 @@ export function PaymentFollowUpDetailPage({
       )}
       {loading && <div className="detail-skeleton"><span /><div><span /><span /></div></div>}
       {paymentCase && (
-        <div className="pf pf--stack" data-tone={tone}>
-          <div className="pf-top">
-            <header className="pf-hero pf-rise" style={rise(0)}>
-              <span className="pf-pill"><i aria-hidden="true" />{pill}</span>
-              <p className="pf-hero__label">{amountLabel}</p>
-              <Amount value={heroValue} currency={currency} available={Boolean(receivable)} />
-              <p className="pf-hero__detail">
-                <span>{heroDetail}</span>
-                {!settled && nextReminderAt && <span className="pf-hero__next"><BellRing size={13} aria-hidden="true" /> Next reminder {formatDateTime(nextReminderAt)}</span>}
-              </p>
-              {(!settled || paymentCase.restartable) && (
-                <div className="pf-actions">
-                  {!settled && (
-                    <button className="pf-btn pf-btn--solid" type="button" onClick={openMarkPaid}>
-                      <CircleCheck size={16} aria-hidden="true" /> Mark as paid
-                    </button>
-                  )}
-                  {paymentCase.restartable && (
-                    <button className="pf-btn pf-btn--ghost" type="button" onClick={() => { setRestartError(''); setConfirmingRestart(true); }}>
-                      <RotateCcw size={15} aria-hidden="true" /> Restart reminders
-                    </button>
+        <div className="pf pf--stack pf--doc" data-tone={tone}>
+          <div className="dd-layout">
+            <div className="dd-main">
+              <section className="dd-card dd-summary dd-summary--flush pf-rise" style={rise(0)} aria-label="Summary">
+                <div className="dd-summary__top">
+                  <span className="pf-pill"><i aria-hidden="true" />{pill}</span>
+                  {(!settled || paymentCase.restartable) && (
+                    <div className="pf-actions">
+                      {!settled && (
+                        <button className="pf-btn pf-btn--solid" type="button" onClick={openMarkPaid}>
+                          <CircleCheck size={14} aria-hidden="true" /> Mark as paid
+                        </button>
+                      )}
+                      {paymentCase.restartable && (
+                        <button className="pf-btn pf-btn--ghost" type="button" onClick={() => { setRestartError(''); setConfirmingRestart(true); }}>
+                          <RotateCcw size={14} aria-hidden="true" /> Restart reminders
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
+
+                <div className="dd-figure">
+                  <div>
+                    <p className="pf-hero__label">{amountLabel}</p>
+                    <Amount value={heroValue} currency={currency} available={Boolean(receivable)} />
+                  </div>
+                  <p className="dd-headline">
+                    <strong>{heroDetail}</strong>
+                    {!settled && nextReminderAt && <span><BellRing size={12} aria-hidden="true" /> Next reminder {formatDateTime(nextReminderAt)}</span>}
+                  </p>
+                </div>
+
+                <Journey title="What happened" hint="Oldest to newest" items={journey} label="Payment history" />
+
+                <dl className="dd-stats dd-stats--four">
+                  <div><dt>Invoice total</dt><dd>{receivable ? formatCurrency(original, currency) : '—'}</dd><small>{invoiceNumber ? `Invoice ${invoiceNumber}` : ' '}</small></div>
+                  <div><dt>Received</dt><dd className={paid > 0 ? 'pf-pos' : undefined}>{receivable ? formatCurrency(paid, currency) : '—'}</dd><small>{paidShare}% of invoice</small></div>
+                  <div><dt>Lateness</dt><dd>{receivable?.aging_bucket && !settled ? agingLabel(receivable.aging_bucket) : settled ? 'Settled' : '—'}</dd><small>{receivable?.payment_status ? humanize(receivable.payment_status) : ' '}</small></div>
+                  <div><dt>Reminders</dt><dd>{sentCount} sent</dd><small>{lastReminderAt ? `Last ${formatDate(lastReminderAt)}` : 'None yet'}</small></div>
+                </dl>
+              </section>
+
+              <section className="dd-card dd-details pf-rise" style={rise(1)} aria-label="Details">
+                <dl className="dd-facts">
+                  <div>
+                    <dt>Customer</dt>
+                    <dd>
+                      {customer?.id
+                        ? <button className="pf-link" type="button" onClick={() => onNavigate(`/customers/${customer.id}`)}>{customer.display_name}</button>
+                        : 'Customer unavailable'}
+                    </dd>
+                  </div>
+                  <div><dt>Customer code</dt><dd>{customer?.sap_customer_number ?? '—'}</dd></div>
+                  <div><dt>WhatsApp</dt><dd className="mono">{paymentCase.whatsappNumber ?? '—'}</dd></div>
+                  <div><dt>Invoice</dt><dd>{invoiceNumber ?? '—'}</dd></div>
+                  <div><dt>Issued</dt><dd>{formatDate(paymentCase.invoice?.billing_document_date)}</dd></div>
+                  <div><dt>Due</dt><dd>{formatDate(dueDate)}</dd></div>
+                </dl>
+                <details className="ds-tech pf-tech">
+                  <summary>Technical details</summary>
+                  <dl className="dt-details dt-details--stacked">
+                    <div><dt>Case reference</dt><dd>#{paymentCase.id}</dd></div>
+                    <div><dt>Follow-up status</dt><dd>{humanize(paymentCase.status)}</dd></div>
+                    <div><dt>Last reminder</dt><dd>{formatDateTime(lastReminderAt)}</dd></div>
+                    <div><dt>Last synced from SAP</dt><dd>{formatDateTime(receivable?.last_synced_at)}</dd></div>
+                  </dl>
+                </details>
+              </section>
+
+              {settled && confirmation && (
+                <section className="dd-card dd-details pf-rise" style={rise(2)} aria-label="Payment record">
+                  <header className="dd-card__head">
+                    <h3>Payment record</h3>
+                    <span>Entered manually</span>
+                  </header>
+                  <dl className="dd-facts">
+                    {confirmation.payment_date && <div><dt>Paid on</dt><dd>{formatDate(confirmation.payment_date)}</dd></div>}
+                    {confirmation.payment_method && <div><dt>Method</dt><dd>{methodLabel(confirmation.payment_method)}</dd></div>}
+                    {confirmation.reference_number && <div><dt>Reference</dt><dd className="mono">{confirmation.reference_number}</dd></div>}
+                    {confirmation.marked_by && <div><dt>Recorded by</dt><dd>{confirmation.marked_by}</dd></div>}
+                    {confirmation.confirmed_at && <div><dt>Recorded</dt><dd>{formatDateTime(confirmation.confirmed_at)}</dd></div>}
+                    {confirmation.notes && <div className="dd-facts__wide"><dt>Note</dt><dd>{confirmation.notes}</dd></div>}
+                  </dl>
+                </section>
               )}
-            </header>
+            </div>
+
             <PhoneFrame
             name={customer?.display_name ?? 'Customer'}
             subtitle={paymentCase.whatsappNumber ?? 'WhatsApp'}
@@ -361,62 +424,6 @@ export function PaymentFollowUpDetailPage({
             )}
           </PhoneFrame>
           </div>
-
-            <Journey title="What happened" hint="Oldest to newest" items={journey} label="Payment history" />
-
-            <dl className="pf-ledger pf-rise" style={rise(2)}>
-              <div><dt>Invoice total</dt><dd>{receivable ? formatCurrency(original, currency) : '—'}</dd></div>
-              <div><dt>Received</dt><dd className={paid > 0 ? 'pf-pos' : undefined}>{receivable ? formatCurrency(paid, currency) : '—'}<small>{paidShare}% of invoice</small></dd></div>
-              <div><dt>Lateness</dt><dd>{receivable?.aging_bucket && !settled ? agingLabel(receivable.aging_bucket) : settled ? 'Settled' : '—'}<small>{receivable?.payment_status ? humanize(receivable.payment_status) : ' '}</small></dd></div>
-              <div><dt>Reminders</dt><dd>{sentCount} sent<small>{lastReminderAt ? `Last ${formatDate(lastReminderAt)}` : 'None yet'}</small></dd></div>
-            </dl>
-
-            <div className="pf-info pf-rise" style={rise(3)}>
-              <section className="pf-block" aria-label="Customer">
-                <p className="pf-kicker">Customer</p>
-                <h3>
-                  {customer?.id
-                    ? <button className="pf-link" type="button" onClick={() => onNavigate(`/customers/${customer.id}`)}>{customer.display_name}</button>
-                    : 'Customer unavailable'}
-                </h3>
-                <dl className="pf-rows">
-                  <StatementRow label="Customer code">{customer?.sap_customer_number ?? '—'}</StatementRow>
-                  <StatementRow label="WhatsApp" mono>{paymentCase.whatsappNumber ?? '—'}</StatementRow>
-                </dl>
-              </section>
-              <section className="pf-block" aria-label="Invoice">
-                <p className="pf-kicker">Invoice</p>
-                <h3>{invoiceNumber ?? '—'}</h3>
-                <dl className="pf-rows">
-                  <StatementRow label="Issued">{formatDate(paymentCase.invoice?.billing_document_date)}</StatementRow>
-                  <StatementRow label="Due">{formatDate(dueDate)}</StatementRow>
-                </dl>
-              </section>
-              {settled && confirmation && (
-                <section className="pf-block pf-block--wide" aria-label="Payment record">
-                  <p className="pf-kicker">Payment record <span>Entered manually</span></p>
-                  <dl className="pf-rows pf-rows--two">
-                    {confirmation.payment_date && <StatementRow label="Paid on">{formatDate(confirmation.payment_date)}</StatementRow>}
-                    {confirmation.payment_method && <StatementRow label="Method">{methodLabel(confirmation.payment_method)}</StatementRow>}
-                    {confirmation.reference_number && <StatementRow label="Reference" mono>{confirmation.reference_number}</StatementRow>}
-                    {confirmation.marked_by && <StatementRow label="Recorded by">{confirmation.marked_by}</StatementRow>}
-                    {confirmation.confirmed_at && <StatementRow label="Recorded">{formatDateTime(confirmation.confirmed_at)}</StatementRow>}
-                    {confirmation.notes && <StatementRow label="Note" wrap>{confirmation.notes}</StatementRow>}
-                  </dl>
-                </section>
-              )}
-            </div>
-
-            <details className="ds-tech pf-tech">
-              <summary>Technical details</summary>
-              <dl className="dt-details dt-details--stacked">
-                <div><dt>Case reference</dt><dd>#{paymentCase.id}</dd></div>
-                <div><dt>Follow-up status</dt><dd>{humanize(paymentCase.status)}</dd></div>
-                <div><dt>Last reminder</dt><dd>{formatDateTime(lastReminderAt)}</dd></div>
-                <div><dt>Last synced from SAP</dt><dd>{formatDateTime(receivable?.last_synced_at)}</dd></div>
-              </dl>
-            </details>
-
         </div>
       )}
       {confirmingPaid && paymentCase && (

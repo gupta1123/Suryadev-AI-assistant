@@ -1,8 +1,8 @@
-import { CheckCheck, ChevronRight, UserRound } from 'lucide-react';
+import { AlertCircle, CheckCheck, ChevronRight, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { BackLink } from '../components/BackLink';
-import { StatementRow, rise, type PageTone } from '../components/statement';
+import { rise, type PageTone } from '../components/statement';
 import { StatusBadge } from '../components/StatusBadge';
 import { apiRequest } from '../lib/api';
 import { billingDocumentLabel } from '../lib/billing-documents';
@@ -100,124 +100,150 @@ export function CustomerDetailPage({
       {error && <div className="alert alert--error">{error}</div>}
       {loading && <div className="detail-skeleton"><span /><div><span /><span /></div></div>}
       {customer && summary && (
-        <div className="pf" data-tone={summary.tone}>
-          <div className="pf-main">
-            <header className="pf-hero pf-rise" style={rise(0)}>
-              <span className="pf-pill"><i aria-hidden="true" />{summary.pill}</span>
-              <h2 className="pf-hero__name">{customer.name}</h2>
-              <p className="pf-hero__detail"><span>{summary.detail}</span></p>
-            </header>
+        <div className="pf pf--stack pf--doc" data-tone={summary.tone}>
+          <div className="dd-layout">
+            <div className="dd-main">
+              <section className="dd-card dd-summary dd-summary--flush pf-rise" style={rise(0)} aria-label="Summary">
+                <div className="dd-summary__top">
+                  <span className="pf-pill"><i aria-hidden="true" />{summary.pill}</span>
+                </div>
 
-            <dl className="pf-ledger pf-rise" style={rise(1)}>
-              <div><dt>Amount due</dt><dd>{due > 0 ? formatCurrency(due, currency) : '—'}</dd><small>{unpaid.length ? `${unpaid.length} unpaid ${unpaid.length === 1 ? 'invoice' : 'invoices'}` : 'Nothing to pay'}</small></div>
-              <div><dt>Overdue</dt><dd className={lateAmount > 0 ? 'pf-neg' : undefined}>{lateAmount > 0 ? formatCurrency(lateAmount, currency) : '—'}</dd><small>{late.length ? `${late.length} past due date` : 'Nothing late'}</small></div>
-              <div><dt>Documents sent</dt><dd>{documents.length}</dd><small>{failed.length ? <span className="text-danger">{failed.length} not delivered</span> : documents.length ? 'All delivered' : 'None yet'}</small></div>
-              <div><dt>Last sent</dt><dd>{lastSent ? new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(lastSent)) : '—'}</dd><small>{lastSent ? new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(lastSent)) : ' '}</small></div>
-            </dl>
+                <div className="dd-figure">
+                  <div>
+                    <p className="pf-hero__label">Amount due</p>
+                    <p className="pf-amount">{due > 0 ? formatCurrency(due, currency) : '—'}</p>
+                  </div>
+                  <p className="dd-headline">
+                    <strong>{summary.title}</strong>
+                    <span>{summary.detail}</span>
+                  </p>
+                </div>
 
-            <section className="pf-section pf-rise" style={rise(2)} aria-label="Unpaid invoices">
-              <header className="pf-section__head">
-                <h3>Unpaid invoices</h3>
-                <span>{unpaid.length ? 'Most overdue first' : ''}</span>
-              </header>
-              {unpaid.length === 0 ? (
-                <p className="pf-list__empty"><CheckCheck size={16} aria-hidden="true" /> Nothing to pay right now.</p>
-              ) : (
-                <ul className="pf-list">
-                  {unpaid.map((payment) => (
-                    <li key={payment.invoice}>
-                      <button type="button" disabled={!payment.caseId} onClick={() => payment.caseId && onNavigate(`/payments/${payment.caseId}`)}>
-                        <span className="pf-list__main">
-                          <strong>Invoice {payment.invoice}</strong>
-                          <small>Due {formatDate(payment.dueDate)}{payment.nextReminderAt ? ` · next reminder ${formatDateTime(payment.nextReminderAt)}` : ''}</small>
-                        </span>
-                        <span className="pf-list__end">
-                          <strong>{formatCurrency(payment.outstandingAmount, payment.currency)}</strong>
-                          <small className={payment.daysOverdue > 0 ? 'text-danger' : ''}>{payment.daysOverdue > 0 ? `${payment.daysOverdue} ${payment.daysOverdue === 1 ? 'day' : 'days'} late` : payment.agingBucket === 'due' ? 'Due today' : 'Not yet due'}</small>
-                        </span>
-                        <ChevronRight size={16} aria-hidden="true" className="pf-list__chevron" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+                {summary.next && (
+                  <div className="dd-notice" role="alert">
+                    <p className="dd-notice__next"><AlertCircle size={13} aria-hidden="true" /> {summary.next}</p>
+                  </div>
+                )}
 
-            <section className="pf-section pf-rise" style={rise(3)} aria-label="Documents sent">
-              <header className="pf-section__head">
-                <h3>Documents sent</h3>
-                <span>{failed.length ? 'Not delivered shown first' : 'Newest first'}</span>
-              </header>
-              {documents.length === 0 ? (
-                <p className="pf-list__empty"><UserRound size={16} aria-hidden="true" /> Nothing has been sent to this customer yet.</p>
-              ) : (
-                <>
-                  <ul className="pf-list">
-                    {shownDocuments.map((document) => (
-                      <li key={document.jobId}>
-                        <button type="button" onClick={() => onNavigate(`/documents/${document.jobId}`)}>
-                          <span className="document-type-code">{document.type ?? '—'}</span>
+                <dl className="dd-stats">
+                  <div>
+                    <dt>Overdue</dt>
+                    <dd className={lateAmount > 0 ? 'pf-neg' : undefined}>{lateAmount > 0 ? formatCurrency(lateAmount, currency) : '—'}</dd>
+                    <small>{late.length ? `${late.length} past due date` : unpaid.length ? `${unpaid.length} unpaid ${unpaid.length === 1 ? 'invoice' : 'invoices'}` : 'Nothing late'}</small>
+                  </div>
+                  <div>
+                    <dt>Documents sent</dt>
+                    <dd>{documents.length}</dd>
+                    <small>{failed.length ? <span className="text-danger">{failed.length} not delivered</span> : documents.length ? 'All delivered' : 'None yet'}</small>
+                  </div>
+                  <div>
+                    <dt>Last sent</dt>
+                    <dd>{lastSent ? new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(lastSent)) : '—'}</dd>
+                    <small>{lastSent ? new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(lastSent)) : ' '}</small>
+                  </div>
+                </dl>
+              </section>
+
+              <section className="dd-card pf-rise" style={rise(1)} aria-label="Unpaid invoices">
+                <header className="dd-card__head">
+                  <h3>Unpaid invoices</h3>
+                  <span>{unpaid.length ? 'Most overdue first' : ''}</span>
+                </header>
+                {unpaid.length === 0 ? (
+                  <p className="pf-list__empty"><CheckCheck size={16} aria-hidden="true" /> Nothing to pay right now.</p>
+                ) : (
+                  <ul className="dd-list">
+                    {unpaid.map((payment) => (
+                      <li key={payment.invoice}>
+                        <button type="button" disabled={!payment.caseId} onClick={() => payment.caseId && onNavigate(`/payments/${payment.caseId}`)}>
                           <span className="pf-list__main">
-                            <strong>{document.document ? `${billingDocumentLabel(document.type)} ${document.document}` : `Document #${document.jobId}`}</strong>
-                            <small>
-                              {formatDate(document.documentDate)}
-                              {document.amount !== null ? ` · ${formatCurrency(Number(document.amount), document.currency)}` : ''}
-                            </small>
+                            <strong>Invoice {payment.invoice}</strong>
+                            <small>Due {formatDate(payment.dueDate)}{payment.nextReminderAt ? ` · next reminder ${formatDateTime(payment.nextReminderAt)}` : ''}</small>
                           </span>
-                          <StatusBadge status={document.status} />
+                          <span className="pf-list__end">
+                            <strong>{formatCurrency(payment.outstandingAmount, payment.currency)}</strong>
+                            <small className={payment.daysOverdue > 0 ? 'text-danger' : ''}>{payment.daysOverdue > 0 ? `${payment.daysOverdue} ${payment.daysOverdue === 1 ? 'day' : 'days'} late` : payment.agingBucket === 'due' ? 'Due today' : 'Not yet due'}</small>
+                          </span>
                           <ChevronRight size={16} aria-hidden="true" className="pf-list__chevron" />
                         </button>
                       </li>
                     ))}
                   </ul>
-                  {documents.length > DOCUMENTS_PREVIEW && (
-                    <button className="pf-more" type="button" onClick={() => setShowAllDocuments((open) => !open)}>
-                      {showAllDocuments ? 'Show fewer' : `Show all ${documents.length} documents`}
-                    </button>
-                  )}
+                )}
+              </section>
+
+              <section className="dd-card pf-rise" style={rise(2)} aria-label="Documents sent">
+                <header className="dd-card__head">
+                  <h3>Documents sent</h3>
+                  <span>{failed.length ? 'Not delivered shown first' : 'Newest first'}</span>
+                </header>
+                {documents.length === 0 ? (
+                  <p className="pf-list__empty"><UserRound size={16} aria-hidden="true" /> Nothing has been sent to this customer yet.</p>
+                ) : (
+                  <>
+                    <ul className="dd-list">
+                      {shownDocuments.map((document) => (
+                        <li key={document.jobId}>
+                          <button type="button" onClick={() => onNavigate(`/documents/${document.jobId}`)}>
+                            <span className="document-type-code">{document.type ?? '—'}</span>
+                            <span className="pf-list__main">
+                              <strong>{document.document ? `${billingDocumentLabel(document.type)} ${document.document}` : `Document #${document.jobId}`}</strong>
+                              <small>
+                                {formatDate(document.documentDate)}
+                                {document.amount !== null ? ` · ${formatCurrency(Number(document.amount), document.currency)}` : ''}
+                              </small>
+                            </span>
+                            <StatusBadge status={document.status} />
+                            <ChevronRight size={16} aria-hidden="true" className="pf-list__chevron" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                    {documents.length > DOCUMENTS_PREVIEW && (
+                      <button className="pf-more" type="button" onClick={() => setShowAllDocuments((open) => !open)}>
+                        {showAllDocuments ? 'Show fewer' : `Show all ${documents.length} documents`}
+                      </button>
+                    )}
+                  </>
+                )}
+              </section>
+            </div>
+
+            <aside className="dd-card dd-side pf-rise" style={rise(1)} aria-label="WhatsApp">
+              <p className="pf-kicker">How we reach them</p>
+              {primary ? (
+                <>
+                  <p className="pf-side__number mono">{primary.phone}</p>
+                  <span className={`health health--${health.tone}`}>{health.label}</span>
                 </>
+              ) : <p className="pf-side__number">No WhatsApp number</p>}
+              <p className="pf-side__note">{contactExplanation(primary)}</p>
+              {whatsapp.length > 1 && (
+                <ul className="pf-side__others">
+                  {whatsapp.filter((contact) => contact !== primary).map((contact) => {
+                    const state = contactHealth(contact);
+                    return (
+                      <li key={contact.id}>
+                        <span className="mono">{contact.phone}</span>
+                        <span className={`health health--${state.tone}`}>{state.label}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
               )}
-            </section>
-
-            <details className="ds-tech pf-tech">
-              <summary>Technical details</summary>
-              <dl className="dt-details dt-details--stacked">
-                <div><dt>Customer code</dt><dd>{customer.sapCustomerNumber ?? '—'}</dd></div>
-                <div><dt>Business partner</dt><dd>{customer.sapBusinessPartnerId ?? '—'}</dd></div>
-                <div><dt>Legal name</dt><dd>{customer.legalName ?? '—'}</dd></div>
-                <div><dt>Language</dt><dd>{customer.languageCode?.toUpperCase() ?? '—'}</dd></div>
-                <div><dt>Last updated from SAP</dt><dd>{formatDateTime(customer.lastSyncedAt)}</dd></div>
-                <div><dt>Status in SAP</dt><dd>{customer.isActive ? 'Active' : 'Inactive'}</dd></div>
-              </dl>
-            </details>
+              <details className="ds-tech pf-tech">
+                <summary>Technical details</summary>
+                <dl className="dt-details dt-details--stacked">
+                  <div><dt>Customer code</dt><dd>{customer.sapCustomerNumber ?? '—'}</dd></div>
+                  <div><dt>Business partner</dt><dd>{customer.sapBusinessPartnerId ?? '—'}</dd></div>
+                  <div><dt>Legal name</dt><dd>{customer.legalName ?? '—'}</dd></div>
+                  <div><dt>Language</dt><dd>{customer.languageCode?.toUpperCase() ?? '—'}</dd></div>
+                  <div><dt>Last updated from SAP</dt><dd>{formatDateTime(customer.lastSyncedAt)}</dd></div>
+                  <div><dt>Status in SAP</dt><dd>{customer.isActive ? 'Active' : 'Inactive'}</dd></div>
+                </dl>
+              </details>
+            </aside>
           </div>
-
-          <aside className="pf-side pf-rise" style={rise(2)} aria-label="WhatsApp">
-            <p className="pf-kicker">How we reach them</p>
-            {primary ? (
-              <>
-                <p className="pf-side__number mono">{primary.phone}</p>
-                <span className={`health health--${health.tone}`}>{health.label}</span>
-              </>
-            ) : <p className="pf-side__number">No WhatsApp number</p>}
-            <p className="pf-side__note">{contactExplanation(primary)}</p>
-            {whatsapp.length > 1 && (
-              <ul className="pf-side__others">
-                {whatsapp.filter((contact) => contact !== primary).map((contact) => {
-                  const state = contactHealth(contact);
-                  return (
-                    <li key={contact.id}>
-                      <span className="mono">{contact.phone}</span>
-                      <span className={`health health--${state.tone}`}>{state.label}</span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            <dl className="pf-rows pf-side__rows">
-              <StatementRow label="Customer code">{customer.sapCustomerNumber ?? '—'}</StatementRow>
-            </dl>
-          </aside>
         </div>
       )}
     </AppShell>

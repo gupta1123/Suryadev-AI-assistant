@@ -2,7 +2,7 @@ import { AlertCircle, Download, ExternalLink, FileText, RefreshCw, RotateCcw } f
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { BackLink } from '../components/BackLink';
-import { Amount, Bubble, Journey, PhoneFrame, StatementRow, formatTime, rise, type JourneyItem, type PageTone } from '../components/statement';
+import { Amount, Bubble, Journey, PhoneFrame, formatTime, rise, type JourneyItem, type PageTone } from '../components/statement';
 import { apiRequest } from '../lib/api';
 import {
   billingDocumentAmountLabel,
@@ -143,39 +143,107 @@ export function DeliveryDetailPage({
       {loading || !job ? (
         <div className="detail-skeleton"><span /><div><span /><span /></div></div>
       ) : (
-        <div className="pf pf--stack" data-tone={tone}>
-          <div className="pf-top">
-            <header className="pf-hero pf-rise" style={rise(0)}>
-              <span className="pf-pill"><i aria-hidden="true" />{pill}</span>
-              <p className="pf-hero__label">{billingDocumentAmountLabel(documentType)}</p>
-              <Amount value={Number(amount ?? 0)} currency={currency} available={amount !== undefined} />
-              <p className="pf-hero__headline">{summary.title}</p>
-              {stage === 'failed' && (
-                <>
-                  <p className="pf-hero__detail"><span>{failureReason ?? 'No reason was given.'}</span></p>
-                  {nextStep && <p className="pf-hero__detail"><span className="pf-hero__next"><AlertCircle size={13} aria-hidden="true" /> {nextStep}</span></p>}
-                </>
-              )}
-              <div className="pf-actions">
-                {stage === 'failed' ? (
-                  <button className="pf-btn pf-btn--solid" type="button" disabled={retrying} onClick={() => void retry()}>
-                    <RotateCcw size={15} aria-hidden="true" /> {retrying ? 'Trying again…' : 'Try again'}
-                  </button>
-                ) : document?.download_url ? (
-                  <a className="pf-btn pf-btn--solid" href={document.download_url} target="_blank" rel="noreferrer">
-                    <Download size={16} aria-hidden="true" /> Download PDF
-                  </a>
-                ) : null}
-                {document?.preview_url && (
-                  <button className="pf-btn pf-btn--ghost" type="button" onClick={() => setShowPdf((open) => !open)}>
-                    <FileText size={15} aria-hidden="true" /> {showPdf ? 'Hide PDF' : 'View PDF'}
-                  </button>
+        <div className="pf pf--stack pf--doc" data-tone={tone}>
+          <div className="dd-layout">
+            <div className="dd-main">
+              <section className="dd-card dd-summary pf-rise" style={rise(0)} aria-label="Summary">
+                <div className="dd-summary__top">
+                  <span className="pf-pill"><i aria-hidden="true" />{pill}</span>
+                  <div className="pf-actions">
+                    {stage === 'failed' ? (
+                      <button className="pf-btn pf-btn--solid" type="button" disabled={retrying} onClick={() => void retry()}>
+                        <RotateCcw size={14} aria-hidden="true" /> {retrying ? 'Trying again…' : 'Try again'}
+                      </button>
+                    ) : document?.download_url ? (
+                      <a className="pf-btn pf-btn--solid" href={document.download_url} target="_blank" rel="noreferrer">
+                        <Download size={14} aria-hidden="true" /> Download PDF
+                      </a>
+                    ) : null}
+                    {document?.preview_url && (
+                      <button className="pf-btn pf-btn--ghost" type="button" onClick={() => setShowPdf((open) => !open)}>
+                        <FileText size={14} aria-hidden="true" /> {showPdf ? 'Hide PDF' : 'View PDF'}
+                      </button>
+                    )}
+                    <button className="pf-btn pf-btn--ghost" type="button" disabled={refreshing} onClick={() => void load(true)}>
+                      <RefreshCw size={14} className={refreshing ? 'spin' : ''} aria-hidden="true" /> Refresh
+                    </button>
+                  </div>
+                </div>
+
+                <div className="dd-figure">
+                  <div>
+                    <p className="pf-hero__label">{billingDocumentAmountLabel(documentType)}</p>
+                    <Amount value={Number(amount ?? 0)} currency={currency} available={amount !== undefined} />
+                  </div>
+                  <p className="dd-headline">{summary.title}</p>
+                </div>
+
+                {stage === 'failed' && (
+                  <div className="dd-notice" role="alert">
+                    <p>{failureReason ?? 'No reason was given.'}</p>
+                    {nextStep && <p className="dd-notice__next"><AlertCircle size={13} aria-hidden="true" /> {nextStep}</p>}
+                  </div>
                 )}
-                <button className="pf-btn pf-btn--ghost" type="button" disabled={refreshing} onClick={() => void load(true)}>
-                  <RefreshCw size={15} className={refreshing ? 'spin' : ''} aria-hidden="true" /> Refresh
-                </button>
-              </div>
-            </header>
+
+                <Journey
+                  title="What happened"
+                  hint={stage === 'queued' || stage === 'sent' ? 'Updates on its own' : 'Oldest to newest'}
+                  items={journeyItems}
+                  label="Delivery history"
+                />
+              </section>
+
+            {showPdf && document?.preview_url && (
+              <section className="ds-pdf pf-rise" style={rise(1)} aria-label={`${documentLabel} PDF`}>
+                <header>
+                  <strong>{document.file_name ?? `${documentLabel}.pdf`}</strong>
+                  <span>
+                    <a className="dt-link" href={document.preview_url} target="_blank" rel="noreferrer">Open in new tab <ExternalLink size={13} aria-hidden="true" /></a>
+                    {document.download_url && <a className="dt-link" href={document.download_url} target="_blank" rel="noreferrer">Download <Download size={13} aria-hidden="true" /></a>}
+                  </span>
+                </header>
+                <iframe src={`${document.preview_url}#toolbar=1&navpanes=0&view=FitH`} title={`${documentLabel} ${invoice?.sap_billing_document ?? jobId}`} />
+              </section>
+            )}
+
+              <section className="dd-card dd-details pf-rise" style={rise(2)} aria-label="Details">
+                <dl className="dd-facts">
+                  <div>
+                    <dt>Customer</dt>
+                    <dd>
+                      {customer?.id
+                        ? <button className="pf-link" type="button" onClick={() => onNavigate(`/customers/${customer.id}`)}>{customer.display_name}</button>
+                        : 'Customer unavailable'}
+                    </dd>
+                  </div>
+                  <div><dt>Customer code</dt><dd>{customer?.sap_customer_number ?? '—'}</dd></div>
+                  <div><dt>Sent to</dt><dd className="mono">{job.metadata?.masked_recipient ?? '—'}</dd></div>
+                  <div><dt>Document</dt><dd>{documentLabel}</dd>{explainer && <small>{explainer}</small>}</div>
+                  <div><dt>Number</dt><dd>{invoice?.sap_billing_document ?? `#${job.id}`}</dd></div>
+                  <div><dt>Dated</dt><dd>{formatDate(invoice?.billing_document_date)}</dd></div>
+                  <div><dt>Created in SAP</dt><dd>{formatDate(job.created_at)}</dd></div>
+                  <div><dt>Sent</dt><dd>{sentAt ? formatDate(sentAt) : '—'}</dd><small>{sentAt ? formatTime(sentAt) : 'Not sent yet'}</small></div>
+                  <div>
+                    <dt>Read</dt>
+                    <dd>{message?.read_at ? formatDate(message.read_at) : '—'}</dd>
+                    <small>{message?.read_at ? formatTime(message.read_at) : message?.delivered_at ? 'Not confirmed' : 'Not yet'}</small>
+                  </div>
+                </dl>
+                <details className="ds-tech pf-tech">
+                  <summary>Technical details</summary>
+                  <dl className="dt-details dt-details--stacked">
+                    <div><dt>Reference</dt><dd>#{job.id}</dd></div>
+                    <div><dt>Message format</dt><dd className="mono">{job.communication_templates?.name ?? job.metadata?.template_name ?? '—'}</dd></div>
+                    <div><dt>WhatsApp message ID</dt><dd className="mono">{message?.provider_message_id ?? '—'}</dd></div>
+                    <div><dt>Send attempts</dt><dd>{attempts.length} of {job.max_attempts}</dd></div>
+                    <div><dt>Delivered</dt><dd>{formatDateTime(message?.delivered_at)}</dd></div>
+                    <div><dt>Read receipt</dt><dd>{message?.read_at ? formatDateTime(message.read_at) : message?.delivered_at ? 'Not confirmed' : '—'}</dd></div>
+                  </dl>
+                </details>
+
+              </section>
+            </div>
+
             <PhoneFrame name={who} subtitle={job.metadata?.masked_recipient} badge={documentLabel} style={rise(2)}>
             <section className="pf-day" aria-label="Message">
               <h4>{formatDate(message?.sent_at ?? job.created_at)}</h4>
@@ -213,69 +281,6 @@ export function DeliveryDetailPage({
             </section>
           </PhoneFrame>
           </div>
-
-            {showPdf && document?.preview_url && (
-              <section className="ds-pdf pf-rise" style={rise(1)} aria-label={`${documentLabel} PDF`}>
-                <header>
-                  <strong>{document.file_name ?? `${documentLabel}.pdf`}</strong>
-                  <span>
-                    <a className="dt-link" href={document.preview_url} target="_blank" rel="noreferrer">Open in new tab <ExternalLink size={13} aria-hidden="true" /></a>
-                    {document.download_url && <a className="dt-link" href={document.download_url} target="_blank" rel="noreferrer">Download <Download size={13} aria-hidden="true" /></a>}
-                  </span>
-                </header>
-                <iframe src={`${document.preview_url}#toolbar=1&navpanes=0&view=FitH`} title={`${documentLabel} ${invoice?.sap_billing_document ?? jobId}`} />
-              </section>
-            )}
-
-            <Journey
-              title="What happened"
-              hint={stage === 'queued' || stage === 'sent' ? 'Updates on its own' : 'Oldest to newest'}
-              items={journeyItems}
-              label="Delivery history"
-            />
-
-            <dl className="pf-ledger pf-rise" style={rise(2)}>
-              <div><dt>Document</dt><dd>{documentLabel}</dd><small>{explainer ?? ' '}</small></div>
-              <div><dt>Dated</dt><dd>{formatDate(invoice?.billing_document_date)}</dd><small>{invoice?.sap_billing_document ?? ' '}</small></div>
-              <div><dt>Sent</dt><dd>{sentAt ? formatDate(sentAt) : '—'}</dd><small>{sentAt ? formatTime(sentAt) : 'Not sent yet'}</small></div>
-              <div><dt>Read</dt><dd>{message?.read_at ? formatDate(message.read_at) : '—'}</dd><small>{message?.read_at ? formatTime(message.read_at) : message?.delivered_at ? 'Not confirmed' : 'Not yet'}</small></div>
-            </dl>
-
-            <div className="pf-info pf-rise" style={rise(3)}>
-              <section className="pf-block" aria-label="Customer">
-                <p className="pf-kicker">Customer</p>
-                <h3>
-                  {customer?.id
-                    ? <button className="pf-link" type="button" onClick={() => onNavigate(`/customers/${customer.id}`)}>{customer.display_name}</button>
-                    : 'Customer unavailable'}
-                </h3>
-                <dl className="pf-rows">
-                  <StatementRow label="Customer code">{customer?.sap_customer_number ?? '—'}</StatementRow>
-                  <StatementRow label="Sent to" mono>{job.metadata?.masked_recipient ?? '—'}</StatementRow>
-                </dl>
-              </section>
-              <section className="pf-block" aria-label="Document">
-                <p className="pf-kicker">{documentLabel}</p>
-                <h3>{invoice?.sap_billing_document ?? `#${job.id}`}</h3>
-                <dl className="pf-rows">
-                  <StatementRow label={billingDocumentAmountLabel(documentType)}>{amount !== undefined ? formatCurrency(Number(amount), currency) : '—'}</StatementRow>
-                  <StatementRow label="Created in SAP">{formatDate(job.created_at)}</StatementRow>
-                </dl>
-              </section>
-            </div>
-
-            <details className="ds-tech pf-tech">
-              <summary>Technical details</summary>
-              <dl className="dt-details dt-details--stacked">
-                <div><dt>Reference</dt><dd>#{job.id}</dd></div>
-                <div><dt>Message format</dt><dd className="mono">{job.communication_templates?.name ?? job.metadata?.template_name ?? '—'}</dd></div>
-                <div><dt>WhatsApp message ID</dt><dd className="mono">{message?.provider_message_id ?? '—'}</dd></div>
-                <div><dt>Send attempts</dt><dd>{attempts.length} of {job.max_attempts}</dd></div>
-                <div><dt>Delivered</dt><dd>{formatDateTime(message?.delivered_at)}</dd></div>
-                <div><dt>Read receipt</dt><dd>{message?.read_at ? formatDateTime(message.read_at) : message?.delivered_at ? 'Not confirmed' : '—'}</dd></div>
-              </dl>
-            </details>
-
         </div>
       )}
     </AppShell>
