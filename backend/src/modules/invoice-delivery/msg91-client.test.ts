@@ -6,6 +6,7 @@ import {
   buildMsg91PaymentReminderPayload,
   sanitizeMsg91Payload,
 } from './msg91-client.js';
+import { env } from '../../config/env.js';
 
 describe('MSG91 invoice template payload', () => {
   it('maps the approved document template variables exactly once', () => {
@@ -33,6 +34,7 @@ describe('MSG91 invoice template payload', () => {
     assert.equal(components.header_1?.type, 'document');
     assert.equal(components.body_var_1?.value, 'Customer One');
     assert.equal(components.body_var_4?.value, '12,992.00');
+    assert.equal(components.body_var_5?.value, 'SuryaDev');
   });
 
   it('redacts the phone and signed URL before persistence', () => {
@@ -129,5 +131,38 @@ describe('MSG91 payment reminder template payload', () => {
     assert.equal(components.body_2?.value, '236.00');
     assert.equal(components.body_3?.value, '26SG000013');
     assert.equal(components.header_1, undefined);
+  });
+});
+
+describe('updated fixed-signature templates', () => {
+  for (const templateName of ['share_invoice_cancellation_v3', 'share_return_credit_memo_v3', 'share_credit_memo_v2', 'share_debit_memo_v2']) {
+    it(`${templateName} sends exactly four body variables and a PDF`, () => {
+      const payload = buildMsg91InvoicePayload({
+        templateName, templateLanguage: 'en', parameterFormat: 'positional',
+        recipient: '919999999999', documentUrl: 'https://example.test/sample.pdf',
+        documentFileName: 'sample.pdf', customerName: 'Customer One',
+        billingDocument: '9003', billingDocumentDate: '28 Sep 2026',
+        formattedAmount: '8,750.00', teamName: 'SuryaDev',
+      });
+      const template = (payload.payload as any).template;
+      const components = template.to_and_components[0].components;
+      assert.deepEqual(Object.keys(components).sort(), ['body_1', 'body_2', 'body_3', 'body_4', 'header_1']);
+      assert.equal(components.body_4.value, '8,750.00');
+    });
+  }
+  it('keeps legacy reminders compatible and omits body_5 for the approved revision', () => {
+    const original = env.MSG91_PAYMENT_TEMPLATE_NAME;
+    try {
+      for (const name of ['payment_reminder_v1', 'payment_reminder_v3']) {
+        env.MSG91_PAYMENT_TEMPLATE_NAME = name;
+        const payload = buildMsg91PaymentReminderPayload({recipient: '919999999999', customerName: 'Customer One', outstandingAmount: '6,425.00', billingDocument: '9004', billingDocumentDate: '28 Sep 2026', teamName: 'SuryaDev'});
+        const components = (payload.payload as any).template.to_and_components[0].components;
+        assert.equal('body_5' in components, name === 'payment_reminder_v1');
+        assert.equal(components.body_4.value, '28 Sep 2026');
+        assert.equal('header_1' in components, false);
+      }
+    } finally {
+      env.MSG91_PAYMENT_TEMPLATE_NAME = original;
+    }
   });
 });

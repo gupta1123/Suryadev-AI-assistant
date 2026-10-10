@@ -238,15 +238,16 @@ export function SendInvoiceModal({
               <div className="manual-review-grid">
                 <div className="message-bubble">
                   <span className="document-chip"><FileText size={15} aria-hidden="true" /> {preview.invoice.pdfFileName}</span>
-                  <p>Dear {preview.template.variables.var_1},</p>
+                  <p>{preview.invoice.billingDocumentType === 'F2' ? 'Dear' : 'Hello'} {preview.template.variables.var_1},</p>
                   <p>{billingDocumentMessage(
                     preview.invoice.billingDocumentType,
                     preview.template.variables.var_2 ?? preview.invoice.billingDocument,
                     preview.template.variables.var_3 ?? preview.invoice.billingDocumentDate,
+                    preview.template.name,
                   )}</p>
                   <p>{billingDocumentAmountLabel(preview.invoice.billingDocumentType)}: <strong>₹{preview.template.variables.var_4}</strong></p>
-                  <p>{billingDocumentAttachmentMessage(preview.invoice.billingDocumentType)}</p>
-                  <p>Thank you,<br />{billingDocumentSignature(preview.invoice.billingDocumentType, preview.template.variables.var_5 ?? 'SuryaDev')}</p>
+                  <p>{billingDocumentAttachmentMessage(preview.invoice.billingDocumentType, preview.template.name)}</p>
+                  <p>Thank you,<br />{billingDocumentSignature(preview.invoice.billingDocumentType, preview.template.variables.var_5 ?? 'SuryaDev', preview.template.name)}</p>
                 </div>
                 <div className="validation-stack">
                   {preview.validations.map((validation) => (

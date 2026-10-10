@@ -6,6 +6,17 @@ const MSG91_TEMPLATE_URL =
 const MSG91_GET_TEMPLATE_URL =
   'https://control.msg91.com/api/v5/whatsapp/get-template-client/';
 
+// These approved revisions have a fixed company signature, not a fifth variable.
+export function hasFixedTemplateSignature(templateName: string): boolean {
+  return new Set([
+    'share_invoice_cancellation_v3',
+    'share_return_credit_memo_v3',
+    'share_credit_memo_v2',
+    'share_debit_memo_v2',
+    'payment_reminder_v3',
+  ]).has(templateName);
+}
+
 export type Msg91SendResult = {
   ok: boolean;
   statusCode: number;
@@ -87,7 +98,9 @@ export function buildMsg91InvoicePayload(input: Msg91TemplateInput): Record<stri
     [`${bodyPrefix}2`]: { type: 'text', value: input.billingDocument },
     [`${bodyPrefix}3`]: { type: 'text', value: input.billingDocumentDate },
     [`${bodyPrefix}4`]: { type: 'text', value: input.formattedAmount },
-    [`${bodyPrefix}5`]: { type: 'text', value: input.teamName },
+    ...(!hasFixedTemplateSignature(input.templateName)
+      ? { [`${bodyPrefix}5`]: { type: 'text', value: input.teamName } }
+      : {}),
   };
   return {
     integrated_number: digitsOnly(env.MSG91_INTEGRATED_NUMBER),
@@ -140,7 +153,9 @@ export function buildMsg91PaymentReminderPayload(
               body_2: { type: 'text', value: input.outstandingAmount },
               body_3: { type: 'text', value: input.billingDocument },
               body_4: { type: 'text', value: input.billingDocumentDate },
-              body_5: { type: 'text', value: input.teamName },
+              ...(!hasFixedTemplateSignature(env.MSG91_PAYMENT_TEMPLATE_NAME)
+                ? { body_5: { type: 'text', value: input.teamName } }
+                : {}),
             },
           },
         ],

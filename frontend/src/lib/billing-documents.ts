@@ -44,25 +44,34 @@ export function billingDocumentMessage(
   type: string | undefined,
   documentNumber: string,
   documentDate: string,
+  templateName?: string,
 ): string {
   const details = billingDocuments[type?.toUpperCase() ?? ''];
   const label = details?.messageLabel ?? 'billing document';
-  return `Your ${label} ${documentNumber} dated ${documentDate} has been generated.`;
+  const subject = isUpdatedBillingTemplate(templateName) ? label.charAt(0).toUpperCase() + label.slice(1) : `Your ${label}`;
+  return `${subject} ${documentNumber} dated ${documentDate} has been generated.`;
 }
 
 export function billingDocumentAmountLabel(type?: string | null): string {
   return billingDocuments[type?.toUpperCase() ?? '']?.amountLabel ?? 'Document Amount';
 }
 
-export function billingDocumentAttachmentMessage(type?: string | null): string {
-  return billingDocuments[type?.toUpperCase() ?? '']?.attachmentMessage ?? 'Please find the PDF attached above.';
+export function billingDocumentAttachmentMessage(type?: string | null, templateName?: string): string {
+  const message = billingDocuments[type?.toUpperCase() ?? '']?.attachmentMessage ?? 'Please find the PDF attached above.';
+  return isUpdatedBillingTemplate(templateName) ? message.replace(' PDF attached above.', ' attached.') : message;
 }
 
 export function billingDocumentSignature(
   type: string | undefined | null,
   teamName: string,
+  templateName?: string,
 ): string {
+  if (isUpdatedBillingTemplate(templateName)) return 'Suryadev Alloys and Power Private Limited';
   return type?.toUpperCase() === 'F2'
     ? `Team ${teamName}`
     : `The ${teamName} Team`;
+}
+
+export function isUpdatedBillingTemplate(templateName?: string): boolean {
+  return ['share_invoice_cancellation_v3', 'share_return_credit_memo_v3', 'share_credit_memo_v2', 'share_debit_memo_v2'].includes(templateName ?? '');
 }

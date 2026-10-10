@@ -263,18 +263,19 @@ export function DeliveryDetailPage({
                       )}
                     </div>
                   )}
-                  <p>Dear {variables.var_1 ?? customer?.display_name ?? 'Customer'},</p>
+                  <p>{['share_invoice_cancellation_v3', 'share_return_credit_memo_v3', 'share_credit_memo_v2', 'share_debit_memo_v2'].includes(job.metadata?.template_name ?? '') ? 'Hello' : 'Dear'} {variables.var_1 ?? customer?.display_name ?? 'Customer'},</p>
                   <p>{billingDocumentMessage(
                     documentType,
                     variables.var_2 ?? invoice?.sap_billing_document ?? '—',
                     variables.var_3 ?? formatDate(invoice?.billing_document_date),
+                    job.metadata?.template_name,
                   )}</p>
                   <p>
                     {billingDocumentAmountLabel(documentType)}:{' '}
                     <strong>{variables.var_4 ? `₹${variables.var_4}` : amount !== undefined ? formatCurrency(Number(amount), currency) : '—'}</strong>
                   </p>
-                  <p>{billingDocumentAttachmentMessage(documentType)}</p>
-                  <p>Thank you,<br />{billingDocumentSignature(documentType, variables.var_5 ?? 'SuryaDev')}</p>
+                  <p>{billingDocumentAttachmentMessage(documentType, job.metadata?.template_name)}</p>
+                  <p>Thank you,<br />{billingDocumentSignature(documentType, variables.var_5 ?? 'SuryaDev', job.metadata?.template_name)}</p>
                 </Bubble>
                 {stage === 'failed' && <p className="pf-notice"><AlertCircle size={12} aria-hidden="true" /> {failureReason ?? 'No reason was given.'}</p>}
               </div>
