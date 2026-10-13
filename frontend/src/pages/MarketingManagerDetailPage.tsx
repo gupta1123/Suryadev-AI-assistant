@@ -14,7 +14,7 @@ type Detail = {
   attemptCount: number; acceptedAt: string | null; createdAt: string; lastError: string | null;
   customerName: string; customerNumber: string; documentNumber: string; documentType: string;
   documentDate: string; kind: 'document' | 'reminder'; templateName: string;
-  variables: Record<string, string>; document: { fileName: string; url: string } | null;
+  variables: Record<string, string>; document: { fileName: string; url: string; downloadUrl: string } | null;
 };
 
 export function MarketingManagerDetailPage(props: {
@@ -59,7 +59,7 @@ export function MarketingManagerDetailPage(props: {
               <div className="dd-summary__top">
                 <span className="pf-pill"><i />{statusLabel}</span>
                 <div className="pf-actions">
-                  {copy.document && <><a className="pf-btn pf-btn--solid" href={copy.document.url} target="_blank" rel="noreferrer"><Download size={14} /> Download PDF</a><button className="pf-btn pf-btn--ghost" onClick={() => setShowPdf(!showPdf)}><FileText size={14} />{showPdf ? 'Hide PDF' : 'View PDF'}</button></>}
+                  {copy.document && <><a className="pf-btn pf-btn--solid" href={copy.document.downloadUrl} target="_blank" rel="noreferrer"><Download size={14} /> Download PDF</a><button className="pf-btn pf-btn--ghost" onClick={() => setShowPdf(!showPdf)}><FileText size={14} />{showPdf ? 'Hide PDF' : 'View PDF'}</button></>}
                   <button className="pf-btn pf-btn--ghost" disabled={refreshing} onClick={() => void load()}><RefreshCw size={14} /> Refresh</button>
                 </div>
               </div>

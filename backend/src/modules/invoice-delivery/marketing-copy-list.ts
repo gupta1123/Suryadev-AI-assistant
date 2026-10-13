@@ -87,10 +87,17 @@ export async function getMarketingCopyDetail(id: number) {
       variables[key.replace(/^body_(var_)?/, 'var_')] = String(component.value);
     }
   }
-  const document = components.header_1?.type === 'document' ? {
-    fileName: String(components.header_1.filename ?? context.document.file_name),
-    url: await createInvoiceDocumentUrl(context),
-  } : null;
+  let document: { fileName: string; url: string; downloadUrl: string } | null = null;
+  if (components.header_1?.type === 'document') {
+    const [preview, downloadUrl] = await Promise.all([
+      getSupabaseServerClient().storage.from(context.document.storage_bucket)
+        .createSignedUrl(context.document.storage_path, 3600),
+      createInvoiceDocumentUrl(context),
+    ]);
+    if (preview.error || !preview.data) throw new Error('Unable to load manager copy PDF preview');
+    document = { fileName: String(components.header_1.filename ?? context.document.file_name),
+      url: preview.data.signedUrl, downloadUrl };
+  }
   return {
     id: row.id, sourceJobId: row.source_job_id, recipient: formatPhone(row.recipient),
     status: row.status, attemptCount: row.attempt_count, acceptedAt: row.accepted_at,
