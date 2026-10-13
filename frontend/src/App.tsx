@@ -11,6 +11,7 @@ import logoImg from './assets/suryadev-logo.jpg';
 import { apiRequest, ApiError, AUTH_UNAUTHORIZED_EVENT } from './lib/api';
 import { DeliveriesPage } from './pages/DeliveriesPage';
 import { MarketingManagerPage } from './pages/MarketingManagerPage';
+import { MarketingManagerDetailPage } from './pages/MarketingManagerDetailPage';
 import { DeliveryDetailPage } from './pages/DeliveryDetailPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { InboxPage } from './pages/InboxPage';
@@ -156,6 +157,8 @@ function Router({
   switch (route.page) {
     case 'marketingManager':
       return <MarketingManagerPage {...shared} />;
+    case 'marketingManagerDetail':
+      return <MarketingManagerDetailPage {...shared} copyId={route.copyId} />;
     case 'inbox':
       return <InboxPage {...shared} />;
     case 'deliveries':
@@ -195,6 +198,8 @@ function parseRoute(rawPath: string): AppRoute {
   const pathname = canonicalPath(rawPath);
   const match = (pattern: RegExp) => pathname.match(pattern);
   const documentMatch = match(/^\/documents\/(\d+)\/?$/);
+  const copyMatch = match(/^\/marketing-manager\/(\d+)\/?$/);
+  if (copyMatch) return { page: 'marketingManagerDetail', copyId: Number(copyMatch[1]) };
   if (documentMatch) return { page: 'delivery', jobId: Number(documentMatch[1]) };
   const customerMatch = match(/^\/customers\/(\d+)\/?$/);
   if (customerMatch) return { page: 'customer', customerId: Number(customerMatch[1]) };

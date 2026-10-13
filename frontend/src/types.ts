@@ -517,6 +517,7 @@ export type PaymentTestRunResult = {
 
 export type AppRoute =
   | { page: 'marketingManager' }
+  | { page: 'marketingManagerDetail'; copyId: number }
   | { page: 'overview' }
   | { page: 'inbox' }
   | { page: 'deliveries' }

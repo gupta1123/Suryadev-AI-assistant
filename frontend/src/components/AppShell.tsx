@@ -10,7 +10,7 @@ const MAIN_NAV: NavItem[] = [
   { path: '/', label: 'Home', short: 'Home', icon: Home, pages: ['overview'] },
   { path: '/attention', label: 'Needs attention', short: 'Attention', icon: BellRing, pages: ['inbox'] },
   { path: '/documents', label: 'Documents', short: 'Documents', icon: FileText, pages: ['deliveries', 'delivery'] },
-  { path: '/marketing-manager', label: 'Marketing manager', short: 'Copies', icon: Copy, pages: ['marketingManager'] },
+  { path: '/marketing-manager', label: 'Marketing manager', short: 'Copies', icon: Copy, pages: ['marketingManager', 'marketingManagerDetail'] },
   { path: '/customers', label: 'Customers', short: 'Customers', icon: Users, pages: ['customers', 'customer'] },
   { path: '/payments', label: 'Payments', short: 'Payments', icon: BadgeIndianRupee, pages: ['paymentFollowUps', 'paymentFollowUp'] },
 ];

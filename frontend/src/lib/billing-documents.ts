@@ -48,7 +48,7 @@ export function billingDocumentMessage(
 ): string {
   const details = billingDocuments[type?.toUpperCase() ?? ''];
   const label = details?.messageLabel ?? 'billing document';
-  const subject = isUpdatedBillingTemplate(templateName) ? label.charAt(0).toUpperCase() + label.slice(1) : `Your ${label}`;
+  const subject = isUpdatedBillingTemplate(templateName) && type?.toUpperCase() !== 'F2' ? label.charAt(0).toUpperCase() + label.slice(1) : `Your ${label}`;
   return `${subject} ${documentNumber} dated ${documentDate} has been generated.`;
 }
 
@@ -73,5 +73,5 @@ export function billingDocumentSignature(
 }
 
 export function isUpdatedBillingTemplate(templateName?: string): boolean {
-  return ['share_invoice_cancellation_v3', 'share_return_credit_memo_v3', 'share_credit_memo_v2', 'share_debit_memo_v2'].includes(templateName ?? '');
+  return ['share_invoice_with_buttons_v2', 'share_invoice_without_buttons_v1', 'share_invoice_cancellation_v3', 'share_return_credit_memo_v3', 'share_credit_memo_v2', 'share_debit_memo_v2'].includes(templateName ?? '');
 }

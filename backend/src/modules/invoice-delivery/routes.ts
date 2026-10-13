@@ -43,7 +43,7 @@ import { buildSimulatedPaymentPreview } from '../payment-follow-up/policy.js';
 import { preparePaymentEndToEndTest } from '../payment-follow-up/repository.js';
 import { pollSapInvoices } from './sap-poller.js';
 import { processDeliveryQueue } from './worker.js';
-import { listMarketingCopies, marketingCopyListQuerySchema } from './marketing-copy-list.js';
+import { getMarketingCopyDetail, listMarketingCopies, marketingCopyListQuerySchema } from './marketing-copy-list.js';
 import {
   listInvoiceHelpRequests,
   listInvoiceHelpRequestsPage,
@@ -476,6 +476,9 @@ invoiceDeliveryRouter.get(
 
 invoiceDeliveryRouter.get('/marketing-copies', asyncHandler(async (request, response) => {
   response.json({ data: await listMarketingCopies(marketingCopyListQuerySchema.parse(request.query)) });
+}));
+invoiceDeliveryRouter.get('/marketing-copies/:copyId', asyncHandler(async (request, response) => {
+  response.json({ data: await getMarketingCopyDetail(jobIdSchema.parse(request.params.copyId)) });
 }));
 
 invoiceDeliveryRouter.post(
