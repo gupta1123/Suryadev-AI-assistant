@@ -11,6 +11,7 @@ export type DeliveryConfig = {
   supabaseServiceConfigured: boolean;
   msg91Configured: boolean;
   sendEnabled: boolean;
+  marketingCopy?: { enabled: boolean; recipient: string };
   msg91WebhookConfigured: boolean;
   msg91StatusPollingEnabled: boolean;
   templateName: string;
@@ -215,6 +216,7 @@ export type DeliveryJob = {
 };
 
 export type DeliveryJobDetail = Omit<DeliveryJob, 'messages'> & {
+  marketing_copy?: MarketingCopyInfo;
   payment_case_id?: number | null;
   messages?: DeliveryMessage[];
   agent_run?: {
@@ -424,6 +426,7 @@ export type PaymentReminderMessage = {
 };
 
 export type PaymentReminderJob = {
+  marketing_copy?: MarketingCopyInfo;
   id: number;
   status: string;
   attempt_count: number;
@@ -483,6 +486,20 @@ export type PaymentFollowUpCase = {
   jobs?: PaymentReminderJob[];
   restartable?: boolean;
   whatsappNumber?: string | null;
+};
+
+export type MarketingCopyInfo = {
+  enabled: boolean;
+  recipient: string;
+  copies: {
+    id: number;
+    recipient: string;
+    status: 'pending' | 'processing' | 'accepted' | 'failed' | 'unknown';
+    attempt_count: number;
+    accepted_at: string | null;
+    last_error: string | null;
+    created_at: string;
+  }[];
 };
 
 export type PaymentTestRunResult = {

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { enqueueMarketingCopy } from './marketing-copies.js';
 import {
   digitsOnly,
   env,
@@ -122,6 +123,7 @@ async function processClaimedJob(job: Awaited<ReturnType<typeof claimNextDeliver
     teamName: env.MSG91_TEMPLATE_TEAM_NAME,
   };
   const payload = buildMsg91InvoicePayload(templateInput);
+  await enqueueMarketingCopy(context.id, payload);
   const attempt = await startMessageAttempt(
     context,
     message.id,

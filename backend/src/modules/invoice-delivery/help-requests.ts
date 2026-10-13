@@ -1,4 +1,5 @@
 import { getSupabaseServerClient } from '../../lib/supabase.js';
+import { env } from '../../config/env.js';
 import { enqueueHelpRequestAlert } from './help-alerts.js';
 import { processHelpRequestAlertQueue } from './help-alert-worker.js';
 
@@ -103,6 +104,14 @@ export async function processMsg91InvoiceButtonResponse(input: {
   if (!parsed) return { matched: false };
 
   const client = getSupabaseServerClient();
+  // The internal recipient receives identical buttons, but their clicks must
+  // never confirm receipt or open a help request on the customer's behalf.
+  if (env.MSG91_MARKETING_COPY_ENABLED) {
+    const { data: copy, error } = await client.from('marketing_whatsapp_copies')
+      .select('id').eq('provider_message_id', parsed.replyMessageId).limit(1).maybeSingle();
+    if (error) throw new Error(`Unable to identify internal copy response: ${error.message}`);
+    if (copy) return { matched: false };
+  }
   let outboundQuery = client
     .from('messages')
     .select('id,communication_job_id,customer_id,contact_id,provider_integration_id')

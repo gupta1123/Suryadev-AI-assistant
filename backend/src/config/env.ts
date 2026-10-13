@@ -34,6 +34,8 @@ const envSchema = z.object({
   MSG91_AUTHKEY: z.string().min(1).optional(),
   MSG91_INTEGRATED_NUMBER: z.string().optional(),
   MSG91_SEND_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+  MSG91_MARKETING_COPY_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+  MSG91_MARKETING_COPY_RECIPIENT: z.string().regex(/^[1-9][0-9]{7,14}$/).default('919445029682'),
   MSG91_TEMPLATE_NAME: z.string().min(1).default('share_invoice'),
   MSG91_CANCELLATION_TEMPLATE_NAME: z.string().min(1).default('share_invoice_cancellation_v3'),
   MSG91_RETURN_CREDIT_MEMO_TEMPLATE_NAME: z.string().min(1).default('share_return_credit_memo_v3'),

@@ -1294,3 +1294,17 @@ input:focus, select:focus, textarea:focus { border-color: #ea580c; box-shadow: 0
   .dd-stats--four > div:nth-child(3) { border-left: 0; }
   .dd-stats--four > div:nth-child(n + 3) { border-top: 1px solid #f1ede7; }
 }
+.marketing-copy {
+  margin-top: 12px;
+  padding: 12px 0;
+  border-top: 1px solid #e5dfd5;
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.marketing-copy p { margin: 3px 0; }
+.marketing-copy small { color: #756b60; line-height: 1.5; }
+.marketing-copy [data-copy-status="failed"],
+.marketing-copy [data-copy-status="unknown"] { color: #b42318; }
+.marketing-copy [data-copy-status="accepted"] { color: #166534; }

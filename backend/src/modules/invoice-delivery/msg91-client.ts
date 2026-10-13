@@ -236,7 +236,7 @@ export async function sendHelpRequestAlertTemplate(
   return sendTemplatePayload(buildMsg91HelpRequestAlertPayload(input), timeoutMs);
 }
 
-async function sendTemplatePayload(
+export async function sendTemplatePayload(
   payload: Record<string, unknown>,
   timeoutMs: number,
 ): Promise<Msg91SendResult> {

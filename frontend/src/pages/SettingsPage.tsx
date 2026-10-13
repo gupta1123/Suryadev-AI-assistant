@@ -157,6 +157,13 @@ export function SettingsPage({
               {helpAlertSettings
                 ? <HelpAlertRecipient settings={helpAlertSettings} />
                 : <p className="set-note">Loading the Need Help recipient…</p>}
+              {config?.marketingCopy && (
+                <div className="marketing-copy">
+                  <strong>Marketing manager copies · {config.marketingCopy.enabled ? 'On' : 'Off'}</strong>
+                  <p className="mono">{config.marketingCopy.recipient}</p>
+                  <small>Same customer-facing documents and payment reminders. Read-only; managed on the server.</small>
+                </div>
+              )}
               <p className="set-note">Automation switches are managed on the server. Ask your admin to change them.</p>
             </SettingsSection>
           )}

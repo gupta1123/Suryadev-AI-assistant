@@ -2,6 +2,7 @@ import { AlertCircle, Download, ExternalLink, FileText, RefreshCw, RotateCcw } f
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { BackLink } from '../components/BackLink';
+import { MarketingCopyStatus } from '../components/MarketingCopyStatus';
 import { Amount, Bubble, Journey, PhoneFrame, formatTime, rise, type JourneyItem, type PageTone } from '../components/statement';
 import { apiRequest } from '../lib/api';
 import {
@@ -83,7 +84,8 @@ export function DeliveryDetailPage({
   }, [paymentCaseId]);
   useEffect(() => {
     const messageStatus = job?.messages?.[0]?.status;
-    if (!job || ['read', 'failed', 'cancelled'].includes(messageStatus ?? job.status)) return;
+    const copyPending = job?.marketing_copy?.copies.some((copy) => ['pending', 'processing'].includes(copy.status));
+    if (!job || (!copyPending && ['read', 'failed', 'cancelled'].includes(messageStatus ?? job.status))) return;
     const interval = window.setInterval(() => void load(true), 2500);
     return () => window.clearInterval(interval);
   }, [job, load]);
@@ -229,6 +231,7 @@ export function DeliveryDetailPage({
                     <small>{message?.read_at ? formatTime(message.read_at) : message?.delivered_at ? 'Not confirmed' : 'Not yet'}</small>
                   </div>
                 </dl>
+                <MarketingCopyStatus info={job.marketing_copy} />
                 <details className="ds-tech pf-tech">
                   <summary>Technical details</summary>
                   <dl className="dt-details dt-details--stacked">

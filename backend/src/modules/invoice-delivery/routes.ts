@@ -106,6 +106,10 @@ invoiceDeliveryRouter.get('/config', (_request, response) => {
       supabaseServiceConfigured: isSupabaseServiceConfigured,
       msg91Configured: isMsg91Configured,
       sendEnabled: env.MSG91_SEND_ENABLED,
+      marketingCopy: {
+        enabled: env.MSG91_MARKETING_COPY_ENABLED,
+        recipient: formatPhone(env.MSG91_MARKETING_COPY_RECIPIENT),
+      },
       msg91WebhookConfigured: Boolean(env.MSG91_WEBHOOK_SECRET),
       msg91StatusPollingEnabled: env.MSG91_STATUS_POLL_ENABLED,
       templateName: env.MSG91_TEMPLATE_NAME,

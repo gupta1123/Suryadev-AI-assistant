@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { getMarketingCopyStatuses } from '../invoice-delivery/marketing-copy-status.js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   env,
@@ -476,13 +477,17 @@ export async function getPaymentCase(caseId: number): Promise<Record<string, unk
     sentTo ||
     restartRecipient?.recipient || '';
   if (!whatsappNumber && customerId) whatsappNumber = await findCustomerWhatsapp(client, customerId);
+  const copyStatuses = await getMarketingCopyStatuses(currentJobs.map((job) => Number(job.id)));
+  const jobsWithCopies = currentJobs.map((job) => ({
+    ...sanitizeJob(job), marketing_copy: copyStatuses.get(Number(job.id)),
+  }));
   return {
     ...paymentCase,
     invoice,
     customer: customerResult.data ?? null,
     receivable: receivable ?? null,
-    latestJob: currentJobs[0] ? sanitizeJob(currentJobs[0]) : null,
-    jobs: currentJobs.map(sanitizeJob),
+    latestJob: jobsWithCopies[0] ?? null,
+    jobs: jobsWithCopies,
     restartable: Boolean(restartRecipient),
     whatsappNumber: whatsappNumber ? formatPhone(whatsappNumber) : null,
   };

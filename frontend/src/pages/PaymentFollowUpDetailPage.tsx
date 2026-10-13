@@ -7,6 +7,7 @@ import { Modal } from '../components/Modal';
 import { apiRequest } from '../lib/api';
 import { formatCurrency, formatDate, formatDateTime, toMessage } from '../lib/format';
 import { messageLifecycleState, type MessageLifecycleState } from '../lib/message-status';
+import { MarketingCopyStatus } from '../components/MarketingCopyStatus';
 import {
   relationOne,
   type AdminUser,
@@ -102,7 +103,8 @@ export function PaymentFollowUpDetailPage({
   const settled = Boolean(paymentCase?.resolved_at) || (receivable !== null && receivable !== undefined && outstanding <= 0);
   const jobs = paymentCase?.jobs ?? (paymentCase?.latestJob ? [paymentCase.latestJob] : []);
   const sentCount = jobs.filter((job) => ['sent', 'delivered', 'read'].includes(toneOf(job))).length;
-  const needsLiveRefresh = Boolean(paymentCase && !settled && (
+  const copyPending = jobs.some((job) => job.marketing_copy?.copies.some((copy) => ['pending', 'processing'].includes(copy.status)));
+  const needsLiveRefresh = copyPending || Boolean(paymentCase && !settled && (
     paymentCase.status === 'active' ||
     jobs.some((job) => {
       const messageStatus = relationOne(job.messages)?.status;
@@ -409,6 +411,7 @@ export function PaymentFollowUpDetailPage({
                     <Bubble tag={`Reminder ${n}`} tone={messageTone} time={formatTime(Number.isFinite(ms) ? new Date(ms).toISOString() : job.created_at)}>
                       <p>{message?.body ?? `Payment reminder for invoice ${invoiceNumber ?? ''}`.trim()}</p>
                     </Bubble>
+                    <MarketingCopyStatus info={job.marketing_copy} />
                     {failure && <p className="pf-notice"><AlertCircle size={12} aria-hidden="true" /> {failure}</p>}
                   </div>
                 ))}

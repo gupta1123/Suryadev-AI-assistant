@@ -1,4 +1,5 @@
 import { app } from './app.js';
+import { startMarketingCopyWorker, stopMarketingCopyWorker } from './modules/invoice-delivery/marketing-copies.js';
 import {
   env,
   isInvoiceDeliveryRuntimeConfigured,
@@ -38,6 +39,7 @@ if (isSupabaseServiceConfigured) {
   startSapInvoicePoller();
   startMsg91StatusPoller();
   startHelpRequestAlertWorker();
+  startMarketingCopyWorker();
   startPaymentFollowUpWorker();
   startPaymentFollowUpScheduler();
 }
@@ -48,6 +50,7 @@ function shutdown(signal: string) {
   stopSapInvoicePoller();
   stopMsg91StatusPoller();
   stopHelpRequestAlertWorker();
+  stopMarketingCopyWorker();
   stopPaymentFollowUpScheduler();
   stopPaymentFollowUpWorker();
   server.close((error) => {

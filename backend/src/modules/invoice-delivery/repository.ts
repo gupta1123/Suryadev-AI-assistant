@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { getMarketingCopyStatuses } from './marketing-copy-status.js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { env } from '../../config/env.js';
 import { HttpError } from '../../lib/http.js';
@@ -473,6 +474,7 @@ export async function getDeliveryJob(jobId: number): Promise<Record<string, unkn
 
   return {
     ...sanitizeJobForApi(job),
+    marketing_copy: (await getMarketingCopyStatuses([jobId])).get(jobId),
     payment_case_id: paymentCaseResult.data ? Number(paymentCaseResult.data.id) : null,
     agent_run: agentRunResult.data,
     invoice_items: itemsResult.data ?? [],

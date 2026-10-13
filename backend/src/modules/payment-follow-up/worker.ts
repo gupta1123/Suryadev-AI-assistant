@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { enqueueMarketingCopy } from '../invoice-delivery/marketing-copies.js';
 import { digitsOnly, env, isPaymentFollowUpSchedulerConfigured } from '../../config/env.js';
 import {
   buildMsg91PaymentReminderPayload,
@@ -95,6 +96,7 @@ async function processClaimedPaymentJob(
     teamName: env.MSG91_TEMPLATE_TEAM_NAME,
   };
   const payload = buildMsg91PaymentReminderPayload(templateInput);
+  await enqueueMarketingCopy(context.id, payload);
   const attempt = await startMessageAttempt(
     context,
     message.id,
