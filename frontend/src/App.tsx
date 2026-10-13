@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import logoImg from './assets/suryadev-logo.jpg';
 import { apiRequest, ApiError, AUTH_UNAUTHORIZED_EVENT } from './lib/api';
 import { DeliveriesPage } from './pages/DeliveriesPage';
+import { MarketingManagerPage } from './pages/MarketingManagerPage';
 import { DeliveryDetailPage } from './pages/DeliveryDetailPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { InboxPage } from './pages/InboxPage';
@@ -153,6 +154,8 @@ function Router({
   }, [path]);
 
   switch (route.page) {
+    case 'marketingManager':
+      return <MarketingManagerPage {...shared} />;
     case 'inbox':
       return <InboxPage {...shared} />;
     case 'deliveries':
@@ -199,6 +202,7 @@ function parseRoute(rawPath: string): AppRoute {
   if (paymentMatch) return { page: 'paymentFollowUp', caseId: Number(paymentMatch[1]) };
   if (/^\/attention\/?$/.test(pathname)) return { page: 'inbox' };
   if (/^\/documents\/?$/.test(pathname)) return { page: 'deliveries' };
+  if (/^\/marketing-manager\/?$/.test(pathname)) return { page: 'marketingManager' };
   if (/^\/customers\/?$/.test(pathname)) return { page: 'customers' };
   if (/^\/payments\/?$/.test(pathname)) return { page: 'paymentFollowUps' };
   if (/^\/settings\/?$/.test(pathname)) return { page: 'settings' };

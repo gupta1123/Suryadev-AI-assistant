@@ -1,4 +1,4 @@
-import { BadgeIndianRupee, BellRing, FileText, Home, LogOut, Settings, Users, type LucideIcon } from 'lucide-react';
+import { BadgeIndianRupee, BellRing, Copy, FileText, Home, LogOut, Settings, Users, type LucideIcon } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import logoImg from '../assets/suryadev-logo.jpg';
 import { loadInbox, subscribeInboxCount } from '../lib/inbox';
@@ -10,6 +10,7 @@ const MAIN_NAV: NavItem[] = [
   { path: '/', label: 'Home', short: 'Home', icon: Home, pages: ['overview'] },
   { path: '/attention', label: 'Needs attention', short: 'Attention', icon: BellRing, pages: ['inbox'] },
   { path: '/documents', label: 'Documents', short: 'Documents', icon: FileText, pages: ['deliveries', 'delivery'] },
+  { path: '/marketing-manager', label: 'Marketing manager', short: 'Copies', icon: Copy, pages: ['marketingManager'] },
   { path: '/customers', label: 'Customers', short: 'Customers', icon: Users, pages: ['customers', 'customer'] },
   { path: '/payments', label: 'Payments', short: 'Payments', icon: BadgeIndianRupee, pages: ['paymentFollowUps', 'paymentFollowUp'] },
 ];
@@ -114,7 +115,7 @@ export function AppShell({
         </main>
       </div>
 
-      <nav className="mobile-nav mobile-nav--five" aria-label="Mobile navigation">
+      <nav className="mobile-nav mobile-nav--six" aria-label="Mobile navigation">
         {MAIN_NAV.map((item) => {
           const Icon = item.icon;
           const active = item.pages.includes(route.page);
