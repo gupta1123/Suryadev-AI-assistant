@@ -27,6 +27,11 @@ after(async () => {
 });
 
 describe('administrator authentication routes', () => {
+  it('protects SAP master phone numbers from unauthenticated requests', async () => {
+    const response = await fetch(`${baseUrl}/customers/sap-masters`);
+    assert.equal(response.status, 401);
+  });
+
   it('rejects protected invoice APIs without a session', async () => {
     const response = await fetch(`${baseUrl}/invoice-delivery/config`);
     assert.equal(response.status, 401);

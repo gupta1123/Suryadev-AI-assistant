@@ -210,7 +210,7 @@ function isEligibleHeader(row: ODataRecord): boolean {
   );
 }
 
-function choosePhone(rows: ODataRecord[]): ODataRecord | undefined {
+export function choosePhone(rows: ODataRecord[]): ODataRecord | undefined {
   return [...rows]
     .filter((row) => text(row.PhoneNumber) || text(row.InternationalPhoneNumber))
     .sort((left, right) => {

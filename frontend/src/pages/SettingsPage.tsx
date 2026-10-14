@@ -1,6 +1,7 @@
 import { BadgeIndianRupee, FileText, LifeBuoy, LogOut, RefreshCw, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { AppShell } from '../components/AppShell';
+import { SapMasters } from '../components/SapMasters';
 import { apiRequest } from '../lib/api';
 import { formatDateTime, toMessage } from '../lib/format';
 import type {
@@ -21,6 +22,7 @@ const SECTIONS = [
   { id: 'sending', label: 'Sending' },
   { id: 'reminders', label: 'Reminder timing' },
   { id: 'sap', label: 'SAP connection' },
+  { id: 'sap-masters', label: 'SAP masters' },
   { id: 'formats', label: 'Message formats' },
   { id: 'account', label: 'Account' },
 ] as const;
@@ -230,6 +232,12 @@ export function SettingsPage({
                   );
                 })}
               </ul>
+            </SettingsSection>
+          )}
+
+          {activeSection === 'sap-masters' && (
+            <SettingsSection id="sap-masters" title="SAP masters" description="Customers and their contact numbers maintained in SAP.">
+              <SapMasters />
             </SettingsSection>
           )}
 
