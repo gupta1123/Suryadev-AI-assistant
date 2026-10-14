@@ -13,7 +13,6 @@ import {
   type AdminUser,
   type AppRoute,
   type PaymentFollowUpCase,
-  type PaymentFollowUpConfig,
   type PaymentReminderJob,
 } from '../types';
 
@@ -64,8 +63,7 @@ export function PaymentFollowUpDetailPage({
   const [confirmingRestart, setConfirmingRestart] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [restartError, setRestartError] = useState('');
-  const [restartNotice, setRestartNotice] = useState<{ repeatSeconds: number; maximum: number } | null>(null);
-  const [now, setNow] = useState(() => Date.now());
+  const [restartNotice, setRestartNotice] = useState(false);
   const loadInFlight = useRef(false);
 
   const load = useCallback(async () => {
@@ -86,12 +84,6 @@ export function PaymentFollowUpDetailPage({
   useEffect(() => {
     void load();
   }, [load]);
-
-  useEffect(() => {
-    if (!restartNotice) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, [restartNotice]);
 
   const receivable = paymentCase?.receivable;
   const currency = receivable?.currency ?? paymentCase?.invoice?.transaction_currency ?? 'INR';
@@ -164,10 +156,8 @@ export function PaymentFollowUpDetailPage({
     setRestartError('');
     try {
       await apiRequest(`/payment-follow-up/cases/${caseId}/restart`, { method: 'POST', body: JSON.stringify({}) });
-      const config = await apiRequest<PaymentFollowUpConfig>('/payment-follow-up/config').catch(() => null);
       await load();
-      setRestartNotice(config ? { repeatSeconds: config.repeatReminderDelaySeconds, maximum: config.maximumTestReminders } : { repeatSeconds: 0, maximum: 0 });
-      setNow(Date.now());
+      setRestartNotice(true);
       setConfirmingRestart(false);
     } catch (restartFailure) {
       setRestartError(toMessage(restartFailure));
@@ -293,8 +283,8 @@ export function PaymentFollowUpDetailPage({
       {restartNotice && paymentCase && (
         <div className="alert alert--info run-notice" role="status">
           <RotateCcw size={15} aria-hidden="true" />
-          <span>{restartNoticeText(paymentCase, jobs.length, restartNotice, now, settled)}</span>
-          <button className="icon-button" type="button" onClick={() => setRestartNotice(null)} aria-label="Dismiss">
+          <span>Reminders restarted.</span>
+          <button className="icon-button" type="button" onClick={() => setRestartNotice(false)} aria-label="Dismiss">
             <X size={15} aria-hidden="true" />
           </button>
         </div>
@@ -532,48 +522,6 @@ export function PaymentFollowUpDetailPage({
       )}
     </AppShell>
   );
-}
-
-function restartNoticeText(
-  paymentCase: PaymentFollowUpCase,
-  sentCount: number,
-  notice: { repeatSeconds: number; maximum: number },
-  now: number,
-  settled: boolean,
-): string {
-  if (settled) return 'Marked as paid. No more reminders will be sent.';
-  const next = paymentCase.next_action_at ? new Date(paymentCase.next_action_at).getTime() : null;
-  const when = next ? `${next > now ? `in ${countdown(next - now)}` : 'any moment now'} (at ${formatTime(paymentCase.next_action_at)})` : '';
-  const cadence = notice.repeatSeconds && notice.maximum
-    ? `, then every ${spokenDuration(notice.repeatSeconds)}, up to ${notice.maximum} ${notice.maximum === 1 ? 'reminder' : 'reminders'}`
-    : '';
-  if (sentCount === 0) {
-    return next ? `Reminders restarted. First reminder ${when}${cadence}.` : 'Reminders restarted. Sending the first reminder…';
-  }
-  if (notice.maximum && sentCount >= notice.maximum) return `All ${sentCount} reminders sent. This run is finished.`;
-  return next
-    ? `Reminder ${sentCount} sent. Next reminder ${when}.`
-    : `Reminder ${sentCount} sent. Waiting for WhatsApp to confirm delivery before scheduling the next one.`;
-}
-
-function countdown(ms: number): string {
-  const totalSeconds = Math.ceil(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return minutes >= 60
-    ? `${Math.floor(minutes / 60)}h ${minutes % 60}m`
-    : `${minutes}:${String(seconds).padStart(2, '0')}`;
-}
-
-function spokenDuration(seconds: number): string {
-  const units: Array<[number, string]> = [[86_400, 'day'], [3_600, 'hour'], [60, 'minute']];
-  for (const [size, unit] of units) {
-    if (seconds >= size && seconds % size === 0) {
-      const count = seconds / size;
-      return `${count} ${unit}${count === 1 ? '' : 's'}`;
-    }
-  }
-  return `${seconds} seconds`;
 }
 
 function toneOf(job: PaymentReminderJob): Tone {
