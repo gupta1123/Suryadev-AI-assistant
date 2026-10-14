@@ -5,7 +5,7 @@ import { buildMsg91InvoicePayload, buildMsg91PaymentReminderPayload } from './ms
 
 describe('independent marketing manager copies', () => {
   const recipient = '919445029682';
-  for (const templateName of ['share_invoice', 'share_invoice_cancellation_v3', 'share_return_credit_memo_v3', 'share_credit_memo_v2', 'share_debit_memo_v2']) {
+  for (const templateName of ['share_invoice', 'share_invoice_with_buttons_v2', 'share_invoice_without_buttons_v1', 'share_invoice_cancellation_v3', 'share_return_credit_memo_v3', 'share_credit_memo_v2', 'share_debit_memo_v2']) {
     it(`preserves the complete ${templateName} payload except recipient`, () => {
       const original = buildMsg91InvoicePayload({
         templateName, templateLanguage: 'en', parameterFormat: templateName === 'share_invoice' ? 'named' : 'positional',

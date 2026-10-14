@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { FixtureInvoiceSource } from './fixture-source.js';
+import { env } from '../../config/env.js';
+import { buildMsg91InvoicePayload } from './msg91-client.js';
 import {
   getBillingDocumentDefinition,
   isTmtDocument,
@@ -8,6 +10,32 @@ import {
 } from './document-policy.js';
 
 describe('billing document routing policy', () => {
+  it('routes new invoices to four positional fields and preserves the legacy named format', () => {
+    const original = env.MSG91_TEMPLATE_NAME;
+    try {
+      for (const name of ['share_invoice', 'share_invoice_with_buttons_v2', 'share_invoice_without_buttons_v1']) {
+        env.MSG91_TEMPLATE_NAME = name;
+        const definition = getBillingDocumentDefinition('F2')!;
+        assert.equal(definition.templateName, name);
+        assert.equal(definition.parameterFormat, name === 'share_invoice' ? 'named' : 'positional');
+        const payload = buildMsg91InvoicePayload({
+          templateName: definition.templateName, parameterFormat: definition.parameterFormat,
+          templateLanguage: 'en', recipient: '919999999999',
+          documentUrl: 'https://example.test/invoice.pdf', documentFileName: 'invoice.pdf',
+          customerName: 'Customer One', billingDocument: '9001',
+          billingDocumentDate: '14 Oct 2026', formattedAmount: '12,992.00', teamName: 'SuryaDev',
+        });
+        const template = (payload.payload as any).template;
+        const components = template.to_and_components[0].components;
+        assert.deepEqual(Object.keys(components).sort(), name === 'share_invoice'
+          ? ['body_var_1', 'body_var_2', 'body_var_3', 'body_var_4', 'body_var_5', 'header_1']
+          : ['body_1', 'body_2', 'body_3', 'body_4', 'header_1']);
+        assert.equal(components.header_1.type, 'document');
+      }
+    } finally {
+      env.MSG91_TEMPLATE_NAME = original;
+    }
+  });
   it('maps each client-requested SAP type to a distinct document kind and template', () => {
     const definitions = SUPPORTED_BILLING_DOCUMENT_TYPES.map((type) =>
       getBillingDocumentDefinition(type),

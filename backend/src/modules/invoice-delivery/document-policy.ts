@@ -32,7 +32,8 @@ export function getBillingDocumentDefinition(
         label: 'Invoice',
         fileNamePrefix: 'Invoice',
         templateName: env.MSG91_TEMPLATE_NAME,
-        parameterFormat: 'named',
+        parameterFormat: ['share_invoice_with_buttons_v2', 'share_invoice_without_buttons_v1']
+          .includes(env.MSG91_TEMPLATE_NAME) ? 'positional' : 'named',
       };
     case 'S1':
       return {

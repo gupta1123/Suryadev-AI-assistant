@@ -9,6 +9,8 @@ const MSG91_GET_TEMPLATE_URL =
 // These approved revisions have a fixed company signature, not a fifth variable.
 export function hasFixedTemplateSignature(templateName: string): boolean {
   return new Set([
+    'share_invoice_with_buttons_v2',
+    'share_invoice_without_buttons_v1',
     'share_invoice_cancellation_v3',
     'share_return_credit_memo_v3',
     'share_credit_memo_v2',

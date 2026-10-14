@@ -135,7 +135,7 @@ describe('MSG91 payment reminder template payload', () => {
 });
 
 describe('updated fixed-signature templates', () => {
-  for (const templateName of ['share_invoice_cancellation_v3', 'share_return_credit_memo_v3', 'share_credit_memo_v2', 'share_debit_memo_v2']) {
+  for (const templateName of ['share_invoice_with_buttons_v2', 'share_invoice_without_buttons_v1', 'share_invoice_cancellation_v3', 'share_return_credit_memo_v3', 'share_credit_memo_v2', 'share_debit_memo_v2']) {
     it(`${templateName} sends exactly four body variables and a PDF`, () => {
       const payload = buildMsg91InvoicePayload({
         templateName, templateLanguage: 'en', parameterFormat: 'positional',
