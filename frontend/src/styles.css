@@ -763,6 +763,9 @@ input:focus, select:focus, textarea:focus { border-color: #ea580c; box-shadow: 0
 .set-toc__tab--active, .set-toc__tab--active:hover { color: #c2410c; background: #fff4ea; }
 .set-toc__tab:focus-visible { outline: 2px solid #ea580c; outline-offset: 1px; }
 .set-body { display: flex; flex-direction: column; gap: 40px; }
+.set-layout--sap-masters { grid-template-columns: 180px minmax(0, 1fr); }
+.sap-masters-table { min-width: 1140px; }
+.sap-master-assignment { min-height: 30px; line-height: 30px; white-space: nowrap; }
 .set-section { scroll-margin-top: 90px; }
 .set-section__head { margin-bottom: 14px; padding-bottom: 12px; display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; border-bottom: 1px solid #e7e3dc; }
 .set-section__head h2 { margin: 0; color: #1a1714; font-size: .95rem; font-weight: 700; letter-spacing: -.01em; }
