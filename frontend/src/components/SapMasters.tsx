@@ -67,8 +67,8 @@ export function SapMasters() {
       ...row.salesAssignments.flatMap((area) => [area.salesGroup, area.salesOffice, area.marketingManagerPhone ?? ''])) &&
     (!phoneFilter || (phoneFilter === 'missing' ? row.phones.length === 0 : row.phones.length > 0)) &&
     (!managerFilter || row.salesAssignments.some((area) => Boolean(area.marketingManagerPhone)) === (managerFilter === 'present')) &&
-    matchesMessaging(messagingFilter, messagingByCustomer.get(row.customerNumber)),
-  ), [directory, search, phoneFilter, managerFilter, messagingFilter, messagingByCustomer]);
+    matchesMessaging(messagingFilter, messagingByCustomer.get(row.customerNumber), Boolean(overview)),
+  ), [directory, search, phoneFilter, managerFilter, messagingFilter, messagingByCustomer, overview]);
   const pagination = usePagination(rows, 'sap-masters', `${search}|${phoneFilter}|${managerFilter}|${messagingFilter}`);
   return <>
     <div className="set-status">
@@ -86,7 +86,7 @@ export function SapMasters() {
         <FilterSelect label="Marketing manager" value={managerFilter} options={[{ value: 'present', label: 'Number available' }, { value: 'missing', label: 'Number not available' }]} onChange={setManagerFilter} />
       </FilterBar>
       {managerFilter && <p className="set-note">Number available means at least one sales area has a marketing manager number. Number not available includes missing, conflicting or inaccessible SAP mappings.</p>}
-      {loading ? <div className="table-skeleton"><span /><span /><span /></div> : !directory ? <div className="empty-table"><strong>Unable to load SAP masters</strong><p>Refresh to try reading SAP again.</p></div> : !rows.length ? <div className="empty-table"><Users size={26} aria-hidden="true" /><strong>No matching customers</strong><p>Try clearing the search or filters.</p></div> : <>
+      {loading || !(overview || overviewError) ? <div className="table-skeleton"><span /><span /><span /></div> : !directory ? <div className="empty-table"><strong>Unable to load SAP masters</strong><p>Refresh to try reading SAP again.</p></div> : !rows.length ? <div className="empty-table"><Users size={26} aria-hidden="true" /><strong>No matching customers</strong><p>Try clearing the search or filters.</p></div> : <>
         <div className="table-scroll"><table className="customers-table sap-masters-table"><thead><tr><th>Customer</th><th>SAP code</th><th>Customer number</th><th>Other numbers</th><th>Sales area<br /><small>Org / Channel / Division</small></th><th>Sales group</th><th>Sales office</th><th>SAP marketing manager</th><th>Messaging</th><th>Manager copy goes to</th></tr></thead><tbody>
           {pagination.pageRows.map((row) => <tr key={row.customerNumber}>
             <td><strong className="invoice-number">{row.name}</strong></td><td className="mono">{row.customerNumber}</td>
@@ -108,8 +108,9 @@ export function SapMasters() {
   </>;
 }
 
-function matchesMessaging(filter: string, customer: MessagingCustomer | undefined): boolean {
-  if (!filter) return true;
+function matchesMessaging(filter: string, customer: MessagingCustomer | undefined, overviewLoaded: boolean): boolean {
+  // If the messaging data could not be loaded, show the plain list instead of an empty table.
+  if (!filter || !overviewLoaded) return true;
   if (!customer) return false;
   if (filter === 'permitted') return customer.status !== 'locked';
   if (filter === 'enabled') return customer.status === 'enabled' || customer.status === 'phone_changed';

@@ -37,6 +37,10 @@ export type Decision =
   | { allowed: true; route: 'customer' | 'internal' }
   | { allowed: false; reason: string };
 
+// Documents created before a customer was enabled are expected to be skipped (they
+// were already handled by earlier deliveries); callers treat this reason as routine.
+export const CREATED_BEFORE_ENABLED = 'document was created before this customer was enabled';
+
 const digits = (value: string | null | undefined) => (value ?? '').replace(/\D/g, '');
 const deny = (reason: string) => ({ allowed: false as const, reason });
 
@@ -80,7 +84,7 @@ export function evaluateDocumentSend(
     const created = input.documentCreatedAt ? Date.parse(input.documentCreatedAt) : NaN;
     const enabledAt = Date.parse(setting.enabledAt);
     if (!Number.isFinite(created) || !Number.isFinite(enabledAt) || created < enabledAt) {
-      return deny('document was created before this customer was enabled');
+      return deny(CREATED_BEFORE_ENABLED);
     }
     return { allowed: true, route: 'customer' };
   }

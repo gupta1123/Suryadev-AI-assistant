@@ -168,7 +168,9 @@ messagingRouter.get(
           check('Customer is enabled in Settings', Boolean(setting?.enabled)),
           check('SAP phone matches the approved number', phoneCheck.allowed, phoneCheck.allowed ? undefined : phoneCheck.reason),
           check('A new document would be sent to the customer', sendCheck.allowed, sendCheck.allowed ? undefined : sendCheck.reason),
-          check('Marketing manager copy would be sent', manager.allowed, manager.allowed ? undefined : manager.reason),
+          manager.allowed && manager.recipient === livePhone
+            ? check('Marketing manager copy: not needed', true, 'The manager’s number is the customer’s own number, so no separate copy is sent.')
+            : check('Marketing manager copy would be sent', manager.allowed, manager.allowed ? undefined : manager.reason),
         ],
       },
     });

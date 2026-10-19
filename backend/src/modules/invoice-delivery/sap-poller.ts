@@ -15,6 +15,7 @@ import { SapInvoiceSource } from './sap-source.js';
 import { processDeliveryQueue } from './worker.js';
 import { isWhatsappTemplateApproved } from './msg91-client.js';
 import { documentPollBlocker } from '../messaging/guard.js';
+import { CREATED_BEFORE_ENABLED } from '../messaging/policy.js';
 import {
   getBillingDocumentDefinition,
   isTmtDocument,
@@ -115,7 +116,9 @@ export async function pollSapInvoices(): Promise<SapPollResult> {
         });
         if (reason) {
           result.skipped += 1;
-          errors.push(`${candidate.billingDocument}: ${reason}`);
+          // Routine: an older document that earlier deliveries already handled. Counted as
+          // skipped, but not reported as a polling error in Settings.
+          if (reason !== CREATED_BEFORE_ENABLED) errors.push(`${candidate.billingDocument}: ${reason}`);
           continue;
         }
         const persisted = await persistInvoiceAndEnqueue(

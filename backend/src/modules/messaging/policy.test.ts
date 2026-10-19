@@ -5,6 +5,7 @@ import {
   type Ceilings,
   type CustomerMessagingSetting,
   type InternalRecipient,
+  CREATED_BEFORE_ENABLED,
   evaluateDocumentSend,
   evaluateLivePhone,
   evaluateManagerCopy,
@@ -79,7 +80,7 @@ describe('document send approval', () => {
   it('refuses a document created before the customer was enabled', () => {
     const decision = send({ documentCreatedAt: BEFORE });
     assert.equal(decision.allowed, false);
-    assert.match((decision as { reason: string }).reason, /before this customer was enabled/);
+    assert.equal((decision as { reason: string }).reason, CREATED_BEFORE_ENABLED);
   });
 
   it('refuses a document with no creation time', () => {
