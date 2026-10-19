@@ -11,7 +11,7 @@ export async function getMarketingCopyStatuses(jobIds: number[]) {
   }>();
   for (const id of jobIds) result.set(id, {
     enabled: env.MSG91_MARKETING_COPY_ENABLED,
-    recipient: formatPhone(env.MSG91_MARKETING_COPY_RECIPIENT), copies: [],
+    recipient: 'Assigned per client', copies: [],
   });
   if (!jobIds.length) return result;
   const { data, error } = await getSupabaseServerClient().from('marketing_whatsapp_copies')

@@ -68,7 +68,7 @@ export async function listMarketingCopies(input: z.infer<typeof marketingCopyLis
     items, total: count ?? 0, page: input.page, pageSize: input.pageSize,
     pageCount: Math.max(1, Math.ceil((count ?? 0) / input.pageSize)),
     enabled: env.MSG91_MARKETING_COPY_ENABLED,
-    recipient: formatPhone(env.MSG91_MARKETING_COPY_RECIPIENT),
+    recipient: 'Each client’s assigned marketing manager',
   };
 }
 

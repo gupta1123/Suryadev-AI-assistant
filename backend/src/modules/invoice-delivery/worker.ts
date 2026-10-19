@@ -15,6 +15,7 @@ import {
   sendInvoiceTemplate,
 } from './msg91-client.js';
 import { formatInvoiceAmount, formatInvoiceDate } from './policy.js';
+import { assertDocumentSendAllowed, jobSource } from '../messaging/guard.js';
 import { getBillingDocumentDefinition } from './document-policy.js';
 import {
   claimNextDeliveryJob,
@@ -89,6 +90,14 @@ async function processClaimedJob(job: Awaited<ReturnType<typeof claimNextDeliver
   ) {
     throw new Error('Delivery worker refused a recipient outside the test allowlist');
   }
+  // Settings-managed approval: customer enabled, SAP phone unchanged since it was
+  // approved, and the document created after the customer was enabled. Read fresh.
+  await assertDocumentSendAllowed({
+    source: jobSource(context.metadata),
+    customerNumber: context.customer.sap_customer_number,
+    recipient,
+    documentCreatedAt: context.invoice.creation_datetime,
+  });
 
   const documentDefinition = getBillingDocumentDefinition(context.invoice.billing_document_type);
   if (!documentDefinition) {
@@ -123,7 +132,7 @@ async function processClaimedJob(job: Awaited<ReturnType<typeof claimNextDeliver
     teamName: env.MSG91_TEMPLATE_TEAM_NAME,
   };
   const payload = buildMsg91InvoicePayload(templateInput);
-  await enqueueMarketingCopy(context.id, payload);
+  await enqueueMarketingCopy(context.id, payload, context.customer.sap_customer_number);
   const attempt = await startMessageAttempt(
     context,
     message.id,

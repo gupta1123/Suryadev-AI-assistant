@@ -1,6 +1,7 @@
 import { BadgeIndianRupee, FileText, LifeBuoy, LogOut, RefreshCw, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { AppShell } from '../components/AppShell';
+import { InternalNumbers } from '../components/MessagingModals';
 import { SapMasters } from '../components/SapMasters';
 import { apiRequest } from '../lib/api';
 import { formatDateTime, toMessage } from '../lib/format';
@@ -10,6 +11,7 @@ import type {
   BillingDocumentTemplateReadiness,
   DeliveryConfig,
   HelpRequestAlertSettings,
+  MessagingOverview,
   PaymentFollowUpConfig,
   ReminderSettings,
   SapPollingStatus,
@@ -23,6 +25,7 @@ const SECTIONS = [
   { id: 'reminders', label: 'Reminder timing' },
   { id: 'sap', label: 'SAP connection' },
   { id: 'sap-masters', label: 'SAP masters' },
+  { id: 'test-numbers', label: 'Team test numbers' },
   { id: 'formats', label: 'Message formats' },
   { id: 'account', label: 'Account' },
 ] as const;
@@ -130,7 +133,7 @@ export function SettingsPage({
     >
       {error && <div className="alert alert--error">{error}</div>}
 
-      <div className="set-layout">
+      <div className={`set-layout${activeSection === 'sap-masters' ? ' set-layout--sap-masters' : ''}`}>
         <nav className="set-toc" role="tablist" aria-label="Settings sections" aria-orientation="vertical">
           {SECTIONS.map((section) => (
             <button
@@ -241,6 +244,12 @@ export function SettingsPage({
             </SettingsSection>
           )}
 
+          {activeSection === 'test-numbers' && (
+            <SettingsSection id="test-numbers" title="Team test numbers" description="Internal numbers that may receive test documents and payment reminders.">
+              <TestNumbers />
+            </SettingsSection>
+          )}
+
           {activeSection === 'account' && (
             <SettingsSection id="account" title="Account">
               <div className="set-status">
@@ -258,6 +267,31 @@ export function SettingsPage({
         </div>
       </div>
     </AppShell>
+  );
+}
+
+function TestNumbers() {
+  const [overview, setOverview] = useState<MessagingOverview | null>(null);
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    try { setOverview(await apiRequest<MessagingOverview>('/messaging/overview')); setError(''); }
+    catch (failure) { setError(toMessage(failure)); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+  return (
+    <>
+      {error && <div className="alert alert--error" role="alert">{error}</div>}
+      {overview && (
+        <div className={`set-status${overview.sapHostApproved ? '' : ' set-status--bad'}`}>
+          <span className={`set-dot set-dot--${overview.sapHostApproved ? 'ok' : 'bad'}`} />
+          <div>
+            <strong>{overview.deliveryMode === 'test' ? 'Test mode' : 'Production mode'} · SAP system {overview.sapHostApproved ? 'verified' : 'NOT verified'}</strong>
+            <small>{overview.sapHost || 'No SAP host configured'}. Sending to customers is limited to the customers and numbers approved on the server.</small>
+          </div>
+        </div>
+      )}
+      {overview ? <InternalNumbers rows={overview.internalRecipients} onChanged={load} /> : !error && <p className="set-note">Loading…</p>}
+    </>
   );
 }
 

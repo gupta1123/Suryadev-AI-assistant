@@ -6,9 +6,11 @@ import {
   env,
   isMsg91Configured,
   isSapConfigured,
+  isSapHostApproved,
   isSapPollingConfigured,
   isSupabaseServiceConfigured,
   sapAllowedCustomers,
+  sapHostname,
   sapTmtMaterialGroups,
   sapTmtMaterialIds,
   sapTmtMaterialPrefixes,
@@ -19,6 +21,7 @@ import {
   type AuthenticatedRequest,
   requireAdmin,
 } from '../../middleware/auth.js';
+import { assertDocumentSendAllowed, isHelpAlertRecipientPermitted } from '../messaging/guard.js';
 import { getInvoiceSource } from './invoice-source.js';
 import { buildInvoicePreview, formatPhone } from './policy.js';
 import {
@@ -109,7 +112,7 @@ invoiceDeliveryRouter.get('/config', (_request, response) => {
       sendEnabled: env.MSG91_SEND_ENABLED,
       marketingCopy: {
         enabled: env.MSG91_MARKETING_COPY_ENABLED,
-        recipient: formatPhone(env.MSG91_MARKETING_COPY_RECIPIENT),
+        recipient: 'Assigned per client in Settings',
       },
       msg91WebhookConfigured: Boolean(env.MSG91_WEBHOOK_SECRET),
       msg91StatusPollingEnabled: env.MSG91_STATUS_POLL_ENABLED,
@@ -129,6 +132,8 @@ invoiceDeliveryRouter.get('/config', (_request, response) => {
       simulationReady: simulationBlockers.length === 0,
       simulationBlockers,
       sapConfigured: isSapConfigured,
+      sapHost: sapHostname,
+      sapHostApproved: isSapHostApproved,
       sapPollingEnabled: env.SAP_POLL_ENABLED,
       sapPollingReady: isSapPollingConfigured,
       sapPollIntervalMs: env.SAP_POLL_INTERVAL_MS,
@@ -161,6 +166,12 @@ invoiceDeliveryRouter.put(
         400,
         'Need Help recipient is invalid',
         parsed.error.issues.map((issue) => ({ label: issue.message })),
+      );
+    }
+    if (!isHelpAlertRecipientPermitted(parsed.data.recipient)) {
+      throw new HttpError(
+        400,
+        'That number is not in the server-approved list for this environment',
       );
     }
     response.json({
@@ -367,8 +378,30 @@ async function buildApprovedInvoicePreview(
         env.MSG91_TEMPLATE_LANGUAGE,
       ),
   );
+  // Settings-managed approval (customer enabled, phone approved, internal numbers).
+  // It must agree with what the delivery worker will enforce, so the preview never
+  // reports a send as allowed that the worker would refuse.
+  let settingsRefusal = '';
+  try {
+    await assertDocumentSendAllowed({
+      source: env.INVOICE_SOURCE,
+      customerNumber: candidate.customer.customerNumber,
+      recipient: preview.actualRecipient,
+      documentCreatedAt: candidate.creationDateTime ?? null,
+    });
+  } catch (error) {
+    settingsRefusal = error instanceof Error ? error.message : 'Approval could not be checked';
+  }
   const validations = [
     ...preview.validations,
+    {
+      code: 'settings_approved',
+      label: settingsRefusal
+        ? `Not approved in Settings. ${settingsRefusal}`
+        : 'Recipient is approved in Settings',
+      passed: !settingsRefusal,
+      blocking: true,
+    },
     {
       code: 'template_approved',
       label: definition

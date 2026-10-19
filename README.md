@@ -199,6 +199,31 @@ The backend also reconciles pending messages from the MSG91 WhatsApp Logs API at
 `MSG91_STATUS_POLL_INTERVAL_MS`. This verifies the provider's final sent,
 delivered, read, or failed state even when a webhook cannot be configured.
 
+## Messaging controls (Settings)
+
+Who may receive WhatsApp messages is managed in **Settings → SAP masters** and
+**Settings → Team test numbers**. A message is sent only when **both** approve it:
+
+1. the server environment ceiling (`SAP_ALLOWED_CUSTOMERS`, `WHATSAPP_TEST_RECIPIENTS`,
+   `PAYMENT_TEST_RECIPIENTS`, `MARKETING_MANAGER_ALLOWED_RECIPIENTS`), and
+2. an explicit approval saved in the database (`customer_messaging_settings`,
+   `internal_test_recipients`).
+
+Settings can only narrow the environment ceiling, never widen it, and empty tables
+mean nothing is sent. Enabling a customer approves its current SAP phone and only
+documents created afterwards are sent. If SAP later reports a different number,
+sending pauses until the new number is approved. Each customer's marketing manager
+copy goes to the manager assigned to that customer (no fallback manager).
+Approvals are re-read from the database immediately before every send.
+
+`SAP_EXPECTED_HOST` pins the SAP tenant: in test mode SAP reads and sends are refused
+if `SAP_API_BASE_URL` has a different hostname. `DELIVERY_MODE=production` is refused
+at start-up unless `ALLOW_PRODUCTION_DELIVERY=true` is also set.
+
+Rollout order: apply `20261019120000_messaging_controls.sql`; run
+`supabase/manual/20261019_seed_messaging_controls.sql` once; set
+`SAP_EXPECTED_HOST` and `MARKETING_MANAGER_ALLOWED_RECIPIENTS`; then deploy.
+
 ## Verification
 
 ```bash

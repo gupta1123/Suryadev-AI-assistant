@@ -599,3 +599,50 @@ export type CustomerDetail = {
 export function relationOne<T>(value: T | T[] | undefined): T | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
+
+export type MessagingSetting = {
+  sapCustomerNumber: string;
+  enabled: boolean;
+  approvedPhone: string | null;
+  enabledAt: string | null;
+  managerName: string | null;
+  managerPhone: string | null;
+  managerSource: 'manual' | 'sap';
+  updatedBy: string | null;
+  updatedAt: string | null;
+};
+
+export type MessagingCustomer = {
+  customerNumber: string;
+  name: string | null;
+  livePhone: string | null;
+  insideCeiling: boolean;
+  status: 'locked' | 'not_enabled' | 'enabled' | 'phone_changed';
+  setting: MessagingSetting | null;
+  managerPhoneApproved: boolean;
+};
+
+export type InternalRecipientRow = {
+  phone: string;
+  label: string | null;
+  allowSimulator: boolean;
+  allowPaymentReminders: boolean;
+  paymentCeiling: boolean;
+  alsoCustomerPhone: boolean;
+  updatedAt: string | null;
+};
+
+export type MessagingOverview = {
+  deliveryMode: 'test' | 'production';
+  sapHost: string;
+  sapHostApproved: boolean;
+  directoryError: string | null;
+  customers: MessagingCustomer[];
+  internalRecipients: InternalRecipientRow[];
+  managerCeilingSize: number;
+};
+
+export type EligibilityResult = {
+  customerNumber: string;
+  checks: Array<{ label: string; passed: boolean; detail: string | null }>;
+};

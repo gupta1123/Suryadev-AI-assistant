@@ -17,6 +17,7 @@ import {
   startMessageAttempt,
 } from '../invoice-delivery/repository.js';
 import { assertAllowedPaymentRecipient } from './policy.js';
+import { assertPaymentRecipientApproved } from '../messaging/guard.js';
 import {
   isPaymentCaseResolved,
   markPaymentReminderAwaitingSent,
@@ -72,6 +73,7 @@ async function processClaimedPaymentJob(
   const context = await getDeliveryJobContext(job);
   const recipient = digitsOnly(String(context.metadata.actual_recipient ?? ''));
   assertAllowedPaymentRecipient(recipient);
+  await assertPaymentRecipientApproved(recipient);
   if (!context.payment_follow_up_case_id) {
     throw new Error('Payment reminder job has no follow-up case');
   }
@@ -96,7 +98,7 @@ async function processClaimedPaymentJob(
     teamName: env.MSG91_TEMPLATE_TEAM_NAME,
   };
   const payload = buildMsg91PaymentReminderPayload(templateInput);
-  await enqueueMarketingCopy(context.id, payload);
+  await enqueueMarketingCopy(context.id, payload, context.customer.sap_customer_number);
   const attempt = await startMessageAttempt(
     context,
     message.id,

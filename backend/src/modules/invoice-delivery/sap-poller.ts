@@ -14,6 +14,7 @@ import {
 import { SapInvoiceSource } from './sap-source.js';
 import { processDeliveryQueue } from './worker.js';
 import { isWhatsappTemplateApproved } from './msg91-client.js';
+import { documentPollBlocker } from '../messaging/guard.js';
 import {
   getBillingDocumentDefinition,
   isTmtDocument,
@@ -107,7 +108,11 @@ export async function pollSapInvoices(): Promise<SapPollResult> {
           continue;
         }
         const candidate = await source.get(invoice.id);
-        const reason = automaticDeliveryBlocker(candidate);
+        const reason = automaticDeliveryBlocker(candidate) ?? await documentPollBlocker({
+          customerNumber: candidate.customer.customerNumber,
+          livePhone: candidate.contact.normalizedValue,
+          creationDateTime: candidate.creationDateTime ?? null,
+        });
         if (reason) {
           result.skipped += 1;
           errors.push(`${candidate.billingDocument}: ${reason}`);

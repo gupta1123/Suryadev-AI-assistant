@@ -14,6 +14,7 @@ import {
   isWhatsappTemplateApproved,
   sendHelpRequestAlertTemplate,
 } from './msg91-client.js';
+import { isHelpAlertRecipientPermitted } from '../messaging/guard.js';
 
 let timer: NodeJS.Timeout | undefined;
 let running = false;
@@ -46,6 +47,14 @@ export async function processHelpRequestAlertQueue(): Promise<void> {
       if (!notification) break;
 
       try {
+        if (!isHelpAlertRecipientPermitted(notification.recipient)) {
+          await markHelpRequestAlertFailed(
+            notification,
+            'Help alert recipient is outside the server-approved numbers',
+            true,
+          );
+          continue;
+        }
         const approved = await isWhatsappTemplateApproved(
           notification.templateName,
           notification.templateLanguage,

@@ -8,6 +8,7 @@ import { authRouter } from './modules/auth/routes.js';
 import { customersRouter } from './modules/customers/routes.js';
 import { invoiceDeliveryRouter } from './modules/invoice-delivery/routes.js';
 import { msg91WebhookRouter } from './modules/invoice-delivery/webhook.js';
+import { messagingRouter } from './modules/messaging/routes.js';
 import { paymentFollowUpRouter } from './modules/payment-follow-up/routes.js';
 import { healthRouter } from './routes/health.js';
 
@@ -44,6 +45,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/invoice-delivery', invoiceDeliveryRouter);
 app.use('/api/payment-follow-up', paymentFollowUpRouter);
 app.use('/api/customers', customersRouter);
+app.use('/api/messaging', messagingRouter);
 app.use('/api/webhooks/msg91', msg91WebhookRouter);
 
 app.use((_request, response) => {

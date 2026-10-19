@@ -35,7 +35,14 @@ const envSchema = z.object({
   MSG91_INTEGRATED_NUMBER: z.string().optional(),
   MSG91_SEND_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   MSG91_MARKETING_COPY_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
-  MSG91_MARKETING_COPY_RECIPIENT: z.string().regex(/^[1-9][0-9]{7,14}$/).default('919445029682'),
+  // Ceiling for per-client marketing manager numbers. Managers are assigned per
+  // customer in Settings; in test mode a manager number must also be listed here.
+  MARKETING_MANAGER_ALLOWED_RECIPIENTS: z.string().default(''),
+  // SAP host this deployment is allowed to read from while DELIVERY_MODE=test.
+  SAP_EXPECTED_HOST: z.string().default(''),
+  // DELIVERY_MODE=production removes every test-mode recipient and document
+  // restriction, so it additionally requires this explicit second switch.
+  ALLOW_PRODUCTION_DELIVERY: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   MSG91_TEMPLATE_NAME: z.string().min(1).default('share_invoice'),
   MSG91_CANCELLATION_TEMPLATE_NAME: z.string().min(1).default('share_invoice_cancellation_v3'),
   MSG91_RETURN_CREDIT_MEMO_TEMPLATE_NAME: z.string().min(1).default('share_return_credit_memo_v3'),
@@ -78,6 +85,13 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+
+if (env.DELIVERY_MODE === 'production' && !env.ALLOW_PRODUCTION_DELIVERY) {
+  console.error(
+    'DELIVERY_MODE=production is refused unless ALLOW_PRODUCTION_DELIVERY=true is also set',
+  );
+  process.exit(1);
+}
 
 export const isSupabaseConfigured = Boolean(
   env.SUPABASE_URL &&
@@ -145,8 +159,32 @@ export const isInvoiceDeliveryRuntimeConfigured = Boolean(
         (env.INVOICE_SOURCE !== 'sap' || isSapTestBoundaryConfigured()))),
 );
 
+export const marketingManagerAllowedRecipients = new Set(
+  env.MARKETING_MANAGER_ALLOWED_RECIPIENTS.split(',').map(digitsOnly).filter(Boolean),
+);
+
+export function hostnameOf(url: string | undefined): string {
+  try {
+    return url ? new URL(url).hostname.toLowerCase() : '';
+  } catch {
+    return '';
+  }
+}
+
+export const sapHostname = hostnameOf(env.SAP_API_BASE_URL);
+
+// In test mode every SAP read and every send is refused unless the configured
+// SAP host exactly matches the host this deployment was approved for.
+export const isSapHostApproved =
+  env.DELIVERY_MODE !== 'test' ||
+  (Boolean(env.SAP_EXPECTED_HOST) &&
+    sapHostname === env.SAP_EXPECTED_HOST.trim().toLowerCase());
+
 export const isSapConfigured = Boolean(
-  env.SAP_API_BASE_URL && env.SAP_API_USERNAME && env.SAP_API_PASSWORD,
+  env.SAP_API_BASE_URL &&
+    env.SAP_API_USERNAME &&
+    env.SAP_API_PASSWORD &&
+    isSapHostApproved,
 );
 
 export const sapAllowedCustomers = new Set(
