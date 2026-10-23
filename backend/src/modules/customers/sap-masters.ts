@@ -1,4 +1,4 @@
-import { isSapConfigured } from '../../config/env.js';
+import { env, isSapConfigured } from '../../config/env.js';
 import { HttpError } from '../../lib/http.js';
 import { SapODataClient, type ODataRecord } from '../invoice-delivery/sap-client.js';
 import { choosePhone } from '../invoice-delivery/sap-source.js';
@@ -24,10 +24,10 @@ const MAX_ROWS = 10_000;
 let cache: (Directory & { checkedAt: string; loadedAt: number }) | undefined;
 let inFlight: Promise<NonNullable<typeof cache>> | undefined;
 
-export async function readSapMasterCustomers(client: Client): Promise<Directory> {
+export async function readSapMasterCustomers(client: Client, managerClient: Client = client): Promise<Directory> {
   // This custom service needs its own SAP authorization. Its failure must not hide
   // the customer directory, or be mistaken for a customer with no assigned manager.
-  const managerRead = client.collection('YY1_SALESGROUP_CDS', 'YY1_SALESGROUP', {
+  const managerRead = managerClient.collection('YY1_SALESGROUP_CDS', 'YY1_SALESGROUP', {
     select: ['SalesGroupid', 'SalesOffice', 'MobileNo'], top: MAX_ROWS,
   }).then((rows) => ({ rows, available: rows.length < MAX_ROWS }))
     .catch(() => ({ rows: [] as ODataRecord[], available: false }));
@@ -102,7 +102,12 @@ export async function readSapMasterCustomers(client: Client): Promise<Directory>
 export async function getSapMasterCustomers(refresh = false) {
   if (!isSapConfigured) throw new HttpError(409, 'SAP API connection is not configured');
   if (!inFlight && (refresh || !cache || Date.now() - cache.loadedAt >= CACHE_MS)) {
-    inFlight = readSapMasterCustomers(new SapODataClient()).then((directory) => {
+    const customerClient = new SapODataClient();
+    // Reuse the approved SAP host, but never replace the working billing login.
+    const managerClient = env.SAP_SALES_GROUP_API_USERNAME && env.SAP_SALES_GROUP_API_PASSWORD
+      ? new SapODataClient(env.SAP_API_BASE_URL, env.SAP_SALES_GROUP_API_USERNAME, env.SAP_SALES_GROUP_API_PASSWORD)
+      : customerClient;
+    inFlight = readSapMasterCustomers(customerClient, managerClient).then((directory) => {
       cache = { ...directory, checkedAt: new Date().toISOString(), loadedAt: Date.now() };
       return cache;
     }).finally(() => { inFlight = undefined; });

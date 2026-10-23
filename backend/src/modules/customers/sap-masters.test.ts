@@ -33,6 +33,27 @@ describe('read-only SAP customer masters', () => {
     assert.deepEqual(await readSapMasterCustomers({ collection: async () => [] }), { items: [], managerMappingAvailable: true });
   });
 
+  it('uses the separate login only for manager mapping, preserving customer reads', async () => {
+    const customerCalls: string[] = [];
+    const managerCalls: string[] = [];
+    const directory = await readSapMasterCustomers({ collection: async (_service, entity) => {
+      customerCalls.push(entity);
+      assert.notEqual(entity, 'YY1_SALESGROUP');
+      if (entity === 'A_Customer') return [{ Customer: '100' }];
+      if (entity === 'A_CustomerSalesArea') return [{ Customer: '100', SalesGroup: '08', SalesOffice: 'HO' }];
+      return [];
+    } }, { collection: async (service, entity) => {
+      managerCalls.push(entity);
+      assert.equal(service, 'YY1_SALESGROUP_CDS');
+      assert.equal(entity, 'YY1_SALESGROUP');
+      return [{ SalesGroupid: '08', SalesOffice: 'HO', MobileNo: '9445029682' }];
+    } });
+    assert.deepEqual(customerCalls.sort(), ['A_AddressPhoneNumber', 'A_BusinessPartnerAddress', 'A_Customer', 'A_CustomerSalesArea']);
+    assert.deepEqual(managerCalls, ['YY1_SALESGROUP']);
+    assert.equal(directory.managerMappingAvailable, true);
+    assert.equal(directory.items[0]?.salesAssignments[0]?.marketingManagerPhone, '919445029682');
+  });
+
   it('propagates SAP failures rather than displaying fabricated or partial data', async () => {
     await assert.rejects(readSapMasterCustomers({ collection: async () => { throw new Error('SAP unavailable'); } }), /SAP unavailable/);
   });

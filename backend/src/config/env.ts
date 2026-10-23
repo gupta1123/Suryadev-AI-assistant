@@ -19,6 +19,9 @@ const envSchema = z.object({
   SAP_API_BASE_URL: z.string().url().optional(),
   SAP_API_USERNAME: z.string().min(1).optional(),
   SAP_API_PASSWORD: z.string().min(1).optional(),
+  // Optional separate communication user, used only for the SALES GROUP lookup.
+  SAP_SALES_GROUP_API_USERNAME: z.string().default(''),
+  SAP_SALES_GROUP_API_PASSWORD: z.string().default(''),
   SAP_POLL_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   SAP_POLL_INTERVAL_MS: z.coerce.number().int().min(5000).max(300000).default(15000),
   SAP_POLL_START_DATE: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default('2026-07-29'),
@@ -75,6 +78,9 @@ const envSchema = z.object({
   PAYMENT_REPEAT_REMINDER_DELAY_SECONDS: z.coerce.number().int().min(5).max(604800).default(604800),
   PAYMENT_TEST_MAX_REMINDERS: z.coerce.number().int().min(1).max(10).default(2),
   PAYMENT_SCHEDULER_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).max(60000).default(5000),
+}).refine((value) => Boolean(value.SAP_SALES_GROUP_API_USERNAME) === Boolean(value.SAP_SALES_GROUP_API_PASSWORD), {
+  message: 'Set both sales-group API username and password, or leave both unset',
+  path: ['SAP_SALES_GROUP_API_USERNAME'],
 });
 
 const parsed = envSchema.safeParse(process.env);

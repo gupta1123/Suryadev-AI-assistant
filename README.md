@@ -101,6 +101,21 @@ atomic SAP checkpoint claim and an index for provider-status reconciliation. The
 backend has safe single-process fallbacks, so development can run before that
 optional migration is applied; apply it before running multiple backend replicas.
 
+## SAP marketing manager directory
+
+Settings → SAP masters reads marketing manager numbers from
+`YY1_SALESGROUP_CDS/YY1_SALESGROUP`, matched to each customer's sales group and
+sales office. If this service uses a different communication user, configure
+`SAP_SALES_GROUP_API_USERNAME` and `SAP_SALES_GROUP_API_PASSWORD` together in the
+backend environment. They use the same approved `SAP_API_BASE_URL` and are used
+only for this read-only lookup; keep the existing `SAP_API_USERNAME` and
+`SAP_API_PASSWORD` for customers and billing documents. With both optional values
+unset, the directory uses the existing SAP login as before.
+
+These directory numbers do not enable messaging, approve recipients, or change
+the configured manager-copy destination. Missing or inaccessible numbers remain
+a dash. Keep passwords out of Git and the frontend.
+
 ## Live SAP polling
 
 Configure these backend-only values:
