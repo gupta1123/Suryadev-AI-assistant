@@ -27,6 +27,8 @@ export type DeliveryConfig = {
   simulationReady: boolean;
   simulationBlockers: string[];
   sapConfigured: boolean;
+  sapHost?: string;
+  sapHostApproved?: boolean;
   sapPollingEnabled: boolean;
   sapPollingReady: boolean;
   sapPollIntervalMs: number;
@@ -646,4 +648,27 @@ export type MessagingOverview = {
 export type EligibilityResult = {
   customerNumber: string;
   checks: Array<{ label: string; passed: boolean; detail: string | null }>;
+};
+
+export type SapMasterDirectoryItem = {
+  customerNumber: string;
+  name: string;
+  primaryPhone: string | null;
+  phones: { number: string; isDefault: boolean }[];
+  salesAssignments: Array<{
+    salesOrganization: string;
+    distributionChannel: string;
+    division: string;
+    salesGroup: string;
+    salesOffice: string;
+    marketingManagerPhone: string | null;
+    managerStatus: 'mapped' | 'missing' | 'unavailable' | 'conflicting';
+  }>;
+};
+
+export type SapMasterDirectory = {
+  source: 'sap';
+  checkedAt: string;
+  managerMappingAvailable: boolean;
+  items: SapMasterDirectoryItem[];
 };

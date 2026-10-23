@@ -38,3 +38,26 @@ export function toMessage(error: unknown): string {
 export function deliveryStatus(jobStatus: string, messageStatus?: string): string {
   return messageStatus ?? jobStatus;
 }
+
+/** 919876543210 → +91 98765 43210 */
+export function formatPhone(value?: string | null): string {
+  const digits = (value ?? '').replace(/\D/g, '');
+  if (!digits) return '—';
+  if (digits.length === 12 && digits.startsWith('91')) return `+91 ${digits.slice(2, 7)} ${digits.slice(7)}`;
+  return `+${digits}`;
+}
+
+/** "3 minutes ago" / "in 2 minutes". Falls back to a date for anything older than a week. */
+export function formatRelative(value?: string | null, now = Date.now()): string {
+  if (!value) return '—';
+  const time = new Date(value).getTime();
+  if (Number.isNaN(time)) return '—';
+  const seconds = Math.round((time - now) / 1000);
+  const abs = Math.abs(seconds);
+  if (abs < 45) return seconds < 0 ? 'just now' : 'in a moment';
+  const formatter = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+  if (abs < 3600) return formatter.format(Math.round(seconds / 60), 'minute');
+  if (abs < 86_400) return formatter.format(Math.round(seconds / 3600), 'hour');
+  if (abs < 7 * 86_400) return formatter.format(Math.round(seconds / 86_400), 'day');
+  return formatDate(value);
+}

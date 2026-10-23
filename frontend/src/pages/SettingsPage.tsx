@@ -1,10 +1,14 @@
-import { BadgeIndianRupee, FileText, LifeBuoy, LogOut, RefreshCw, type LucideIcon } from 'lucide-react';
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { AppShell } from '../components/AppShell';
-import { InternalNumbers } from '../components/MessagingModals';
-import { SapMasters } from '../components/SapMasters';
+import { ConnectionsTab } from '../components/settings/ConnectionsTab';
+import { CustomersTab } from '../components/settings/CustomersTab';
+import { buildIssues, type TabId } from '../components/settings/health';
+import { OverviewTab } from '../components/settings/OverviewTab';
+import { RemindersTab } from '../components/settings/RemindersTab';
+import { TeamTab } from '../components/settings/TeamTab';
+import { Pill } from '../components/settings/ui';
 import { apiRequest } from '../lib/api';
-import { formatDateTime, toMessage } from '../lib/format';
+import { toMessage } from '../lib/format';
 import type {
   AdminUser,
   AppRoute,
@@ -13,28 +17,30 @@ import type {
   HelpRequestAlertSettings,
   MessagingOverview,
   PaymentFollowUpConfig,
-  ReminderSettings,
   SapPollingStatus,
 } from '../types';
 
-type State = 'live' | 'test' | 'paused' | 'off';
-const STATE_LABEL: Record<State, string> = { live: 'On', test: 'Test mode', paused: 'Paused', off: 'Off' };
+const TABS: Array<{ id: TabId; label: string }> = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'customers', label: 'Customers' },
+  { id: 'reminders', label: 'Reminders' },
+  { id: 'connections', label: 'Connections' },
+  { id: 'team', label: 'Team' },
+];
 
-const SECTIONS = [
-  { id: 'sending', label: 'Sending' },
-  { id: 'reminders', label: 'Reminder timing' },
-  { id: 'sap', label: 'SAP connection' },
-  { id: 'sap-masters', label: 'SAP masters' },
-  { id: 'test-numbers', label: 'Team test numbers' },
-  { id: 'formats', label: 'Message formats' },
-  { id: 'account', label: 'Account' },
-] as const;
+// Addresses from the previous seven-section layout keep working.
+const LEGACY_HASHES: Record<string, TabId> = {
+  sending: 'overview',
+  sap: 'connections',
+  formats: 'connections',
+  'sap-masters': 'customers',
+  'test-numbers': 'team',
+  account: 'team',
+};
 
-type SectionId = (typeof SECTIONS)[number]['id'];
-
-function sectionFromHash(): SectionId {
+function tabFromHash(): TabId {
   const hash = window.location.hash.slice(1);
-  return SECTIONS.find((section) => section.id === hash)?.id ?? 'sending';
+  return TABS.find((tab) => tab.id === hash)?.id ?? LEGACY_HASHES[hash] ?? 'overview';
 }
 
 export function SettingsPage({
@@ -52,28 +58,30 @@ export function SettingsPage({
 }) {
   const [config, setConfig] = useState<DeliveryConfig | null>(null);
   const [paymentConfig, setPaymentConfig] = useState<PaymentFollowUpConfig | null>(null);
-  const [helpAlertSettings, setHelpAlertSettings] = useState<HelpRequestAlertSettings | null>(null);
+  const [helpAlert, setHelpAlert] = useState<HelpRequestAlertSettings | null>(null);
   const [polling, setPolling] = useState<SapPollingStatus>(null);
   const [templates, setTemplates] = useState<BillingDocumentTemplateReadiness | null>(null);
   const [checkingTemplates, setCheckingTemplates] = useState(true);
-  const [pollingNow, setPollingNow] = useState(false);
-  const [pollResult, setPollResult] = useState('');
-  const [activeSection, setActiveSection] = useState<SectionId>(sectionFromHash);
-  const [error, setError] = useState('');
+  const [messaging, setMessaging] = useState<MessagingOverview | null>(null);
+  const [messagingError, setMessagingError] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [activeTab, setActiveTab] = useState<TabId>(tabFromHash);
 
   const load = useCallback(async () => {
-    const [configResult, paymentResult, pollingResult, helpAlertResult] = await Promise.allSettled([
+    const [configResult, paymentResult, pollingResult, helpResult, messagingResult] = await Promise.allSettled([
       apiRequest<DeliveryConfig>('/invoice-delivery/config'),
       apiRequest<PaymentFollowUpConfig>('/payment-follow-up/config'),
       apiRequest<SapPollingStatus>('/invoice-delivery/polling-status'),
       apiRequest<HelpRequestAlertSettings>('/invoice-delivery/help-alert-settings'),
+      apiRequest<MessagingOverview>('/messaging/overview'),
     ]);
-    if (configResult.status === 'fulfilled') setConfig(configResult.value);
-    else setError(toMessage(configResult.reason));
+    if (configResult.status === 'fulfilled') { setConfig(configResult.value); setLoadError(''); }
+    else setLoadError(toMessage(configResult.reason));
     if (paymentResult.status === 'fulfilled') setPaymentConfig(paymentResult.value);
     if (pollingResult.status === 'fulfilled') setPolling(pollingResult.value);
-    if (helpAlertResult.status === 'fulfilled') setHelpAlertSettings(helpAlertResult.value);
-    else setError(toMessage(helpAlertResult.reason));
+    if (helpResult.status === 'fulfilled') setHelpAlert(helpResult.value);
+    if (messagingResult.status === 'fulfilled') { setMessaging(messagingResult.value); setMessagingError(''); }
+    else setMessagingError(toMessage(messagingResult.reason));
   }, []);
 
   const checkTemplates = useCallback(async () => {
@@ -92,34 +100,35 @@ export function SettingsPage({
     void checkTemplates();
   }, [load, checkTemplates]);
 
-  function openSection(id: SectionId) {
-    setActiveSection(id);
+  useEffect(() => {
+    const onHashChange = () => setActiveTab(tabFromHash());
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  const openTab = useCallback((id: TabId) => {
+    setActiveTab(id);
     window.history.replaceState(window.history.state, '', `#${id}`);
-  }
+  }, []);
 
-  async function pollNow() {
-    setPollingNow(true);
-    setPollResult('');
-    try {
-      await apiRequest('/invoice-delivery/poll-now', { method: 'POST' });
-      setPollResult('Done. Any new documents are being sent now.');
-      await load();
-    } catch (pollError) {
-      setPollResult(toMessage(pollError));
-    } finally {
-      setPollingNow(false);
+  const issues = useMemo(
+    () => buildIssues({ config, polling, templates, messaging, messagingError }),
+    [config, polling, templates, messaging, messagingError],
+  );
+  const badges = useMemo(() => {
+    const result: Partial<Record<TabId, { tone: 'warn' | 'bad'; count: number }>> = {};
+    for (const issue of issues) {
+      if (issue.tone === 'info') continue;
+      const current = result[issue.tab];
+      result[issue.tab] = {
+        tone: issue.tone === 'bad' || current?.tone === 'bad' ? 'bad' : 'warn',
+        count: (current?.count ?? 0) + 1,
+      };
     }
-  }
+    return result;
+  }, [issues]);
 
-  const liveMode = config?.invoiceSource === 'sap';
-  const billingState: State = !config ? 'off' : !config.msg91Configured || !config.sendEnabled ? 'paused' : liveMode ? 'live' : 'test';
-  const paymentState: State = !paymentConfig?.enabled ? 'off' : !paymentConfig.sendEnabled ? 'paused' : paymentConfig.controlledTest ? 'test' : 'live';
-  const helpState: State = config?.msg91WebhookConfigured ? 'live' : 'off';
-  const intervalMinutes = config?.sapPollIntervalMs ? Math.round(config.sapPollIntervalMs / 60000) : null;
-  const nextCheck = polling?.last_completed_at && config?.sapPollIntervalMs
-    ? new Date(new Date(polling.last_completed_at).getTime() + config.sapPollIntervalMs).toISOString()
-    : null;
-  const pollFailed = polling?.last_status === 'failed';
+  const testMode = config?.deliveryMode === 'test';
 
   return (
     <AppShell
@@ -130,139 +139,56 @@ export function SettingsPage({
       user={user}
       onLogout={onLogout}
       loggingOut={loggingOut}
+      actions={config && <Pill tone={testMode ? 'test' : 'ok'}>{testMode ? 'Test mode' : 'Live'}</Pill>}
     >
-      {error && <div className="alert alert--error">{error}</div>}
+      <div className="st">
+        {loadError && (
+          <div className="alert alert--error st-loaderror" role="alert">
+            <span>Settings couldn’t be loaded: {loadError}</span>
+            <button className="button button--secondary st-sm" type="button" onClick={() => void load()}>Try again</button>
+          </div>
+        )}
 
-      <div className={`set-layout${activeSection === 'sap-masters' ? ' set-layout--sap-masters' : ''}`}>
-        <nav className="set-toc" role="tablist" aria-label="Settings sections" aria-orientation="vertical">
-          {SECTIONS.map((section) => (
-            <button
-              key={section.id}
-              id={`${section.id}-tab`}
-              type="button"
-              role="tab"
-              aria-selected={activeSection === section.id}
-              aria-controls={section.id}
-              className={activeSection === section.id ? 'set-toc__tab set-toc__tab--active' : 'set-toc__tab'}
-              onClick={() => openSection(section.id)}
-            >
-              {section.label}
-            </button>
-          ))}
-        </nav>
+        <Tabs active={activeTab} badges={badges} onSelect={openTab} />
 
-        <div className="set-body">
-          {activeSection === 'sending' && (
-            <SettingsSection id="sending" title="Sending" description="What goes out on WhatsApp automatically.">
-              <ul className="set-rows">
-                <AutomationRow icon={FileText} name="Invoices and memos" detail={liveMode ? 'Sent as soon as SAP creates them' : 'Only test documents are sent right now'} state={billingState} />
-                <AutomationRow icon={BadgeIndianRupee} name="Payment reminders" detail={paymentConfig ? reminderSummary(paymentConfig.firstReminderDelaySeconds, paymentConfig.repeatReminderDelaySeconds, paymentConfig.maximumTestReminders) : 'Sent after an invoice goes out'} state={paymentState} />
-                <AutomationRow icon={LifeBuoy} name="Customer replies" detail="“Need Help” taps show up in Needs attention" state={helpState} />
-              </ul>
-              {helpAlertSettings
-                ? <HelpAlertRecipient settings={helpAlertSettings} />
-                : <p className="set-note">Loading the Need Help recipient…</p>}
-              {config?.marketingCopy && (
-                <div className="marketing-copy">
-                  <strong>Marketing manager copies · {config.marketingCopy.enabled ? 'On' : 'Off'}</strong>
-                  <p className="mono">{config.marketingCopy.recipient}</p>
-                  <small>Same customer-facing documents and payment reminders. Read-only; managed on the server.</small>
-                </div>
-              )}
-              <p className="set-note">Automation switches are managed on the server. Ask your admin to change them.</p>
-            </SettingsSection>
+        <div role="tabpanel" id={`panel-${activeTab}`} aria-labelledby={`tab-${activeTab}`} tabIndex={0} className="st-panelwrap">
+          {activeTab === 'overview' && (
+            <OverviewTab
+              config={config}
+              paymentConfig={paymentConfig}
+              helpAlert={helpAlert}
+              polling={polling}
+              templates={templates}
+              checkingTemplates={checkingTemplates}
+              messaging={messaging}
+              issues={issues}
+              onGo={openTab}
+            />
           )}
-
-          {activeSection === 'reminders' && (
-            <SettingsSection id="reminders" title="Reminder timing" description="When payment reminders go out on WhatsApp after an invoice is sent.">
-              {paymentConfig
-                ? <ReminderTimingForm key={paymentConfig.reminderSettingsUpdatedAt ?? 'default'} config={paymentConfig} onSaved={load} />
-                : <p className="set-note">Loading reminder settings…</p>}
-            </SettingsSection>
+          {activeTab === 'customers' && (
+            <CustomersTab messaging={messaging} messagingError={messagingError} onReload={load} />
           )}
-
-          {activeSection === 'sap' && (
-            <SettingsSection id="sap" title="SAP connection" description="Where new invoices and memos come from.">
-              <div className={`set-status${pollFailed ? ' set-status--bad' : ''}`}>
-                <span className={`set-dot set-dot--${!liveMode ? 'idle' : pollFailed ? 'bad' : 'ok'}`} />
-                <div>
-                  <strong>{!liveMode ? 'Not connected · using test data' : pollFailed ? 'Last check failed' : 'Connected'}</strong>
-                  <small>{liveMode ? `Checks SAP for new documents${intervalMinutes ? ` every ${intervalMinutes} min` : ''}` : 'Turn on live SAP on the server to send real documents.'}</small>
-                </div>
-                {liveMode && (
-                  <button className="button button--secondary" type="button" disabled={pollingNow || !config?.sapPollingReady} onClick={() => void pollNow()}>
-                    <RefreshCw size={15} className={pollingNow ? 'spin' : ''} aria-hidden="true" /> {pollingNow ? 'Checking…' : 'Check SAP now'}
-                  </button>
-                )}
-              </div>
-              {pollResult && <p className="set-note">{pollResult}</p>}
-              <dl className="dt-details dt-details--stacked set-facts">
-                <div><dt>Last check</dt><dd>{formatDateTime(polling?.last_completed_at)}</dd></div>
-                <div><dt>Next check</dt><dd>{liveMode ? formatDateTime(nextCheck) : '—'}</dd></div>
-                <div><dt>Documents found last time</dt><dd>{polling ? polling.records_processed : '—'}</dd></div>
-                <div><dt>Checking from</dt><dd>{config?.sapPollStartDate || '—'}</dd></div>
-              </dl>
-              {polling?.last_error && <p className="dt-timeline__note">{polling.last_error}</p>}
-            </SettingsSection>
+          {activeTab === 'reminders' && <RemindersTab paymentConfig={paymentConfig} onSaved={load} />}
+          {activeTab === 'connections' && (
+            <ConnectionsTab
+              config={config}
+              polling={polling}
+              templates={templates}
+              checkingTemplates={checkingTemplates}
+              messaging={messaging}
+              onCheckTemplates={checkTemplates}
+              onRefresh={load}
+            />
           )}
-
-          {activeSection === 'formats' && (
-            <SettingsSection
-              id="formats"
-              title="Message formats"
-              description="WhatsApp must approve each format before it can be sent."
-              action={(
-                <button className="button button--secondary button--compact" type="button" disabled={checkingTemplates} onClick={() => void checkTemplates()}>
-                  <RefreshCw size={14} className={checkingTemplates ? 'spin' : ''} aria-hidden="true" /> Check again
-                </button>
-              )}
-            >
-              <ul className="set-rows">
-                {(config?.billingDocumentTypes ?? []).map((documentType) => {
-                  const approved = templates?.templates.find((item) => item.type === documentType.type)?.approved;
-                  const state = checkingTemplates || !templates ? 'idle' : approved ? 'ok' : 'pending';
-                  return (
-                    <li key={documentType.type} className="set-row">
-                      <span className="document-type-code">{documentType.type}</span>
-                      <span className="set-row__text">
-                        <strong>{documentType.label}</strong>
-                        <small className="mono">{documentType.templateName}</small>
-                      </span>
-                      <span className={`health health--${state === 'ok' ? 'ok' : state === 'pending' ? 'warn' : 'none'}`}>
-                        {state === 'idle' ? (checkingTemplates ? 'Checking…' : 'Unknown') : state === 'ok' ? 'Approved' : 'Waiting for approval'}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </SettingsSection>
-          )}
-
-          {activeSection === 'sap-masters' && (
-            <SettingsSection id="sap-masters" title="SAP masters" description="Customers and their contact numbers maintained in SAP.">
-              <SapMasters />
-            </SettingsSection>
-          )}
-
-          {activeSection === 'test-numbers' && (
-            <SettingsSection id="test-numbers" title="Team test numbers" description="Internal numbers that may receive test documents and payment reminders.">
-              <TestNumbers />
-            </SettingsSection>
-          )}
-
-          {activeSection === 'account' && (
-            <SettingsSection id="account" title="Account">
-              <div className="set-status">
-                <span className="account-avatar">AD</span>
-                <div>
-                  <strong>{user.displayName}</strong>
-                  <small>Signed in as @{user.username}</small>
-                </div>
-                <button className="button button--secondary" type="button" disabled={loggingOut} onClick={() => void onLogout()}>
-                  <LogOut size={15} aria-hidden="true" /> {loggingOut ? 'Signing out…' : 'Sign out'}
-                </button>
-              </div>
-            </SettingsSection>
+          {activeTab === 'team' && (
+            <TeamTab
+              messaging={messaging}
+              messagingError={messagingError}
+              onReload={load}
+              user={user}
+              onLogout={onLogout}
+              loggingOut={loggingOut}
+            />
           )}
         </div>
       </div>
@@ -270,204 +196,57 @@ export function SettingsPage({
   );
 }
 
-function TestNumbers() {
-  const [overview, setOverview] = useState<MessagingOverview | null>(null);
-  const [error, setError] = useState('');
-  const load = useCallback(async () => {
-    try { setOverview(await apiRequest<MessagingOverview>('/messaging/overview')); setError(''); }
-    catch (failure) { setError(toMessage(failure)); }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
-  return (
-    <>
-      {error && <div className="alert alert--error" role="alert">{error}</div>}
-      {overview && (
-        <div className={`set-status${overview.sapHostApproved ? '' : ' set-status--bad'}`}>
-          <span className={`set-dot set-dot--${overview.sapHostApproved ? 'ok' : 'bad'}`} />
-          <div>
-            <strong>{overview.deliveryMode === 'test' ? 'Test mode' : 'Production mode'} · SAP system {overview.sapHostApproved ? 'verified' : 'NOT verified'}</strong>
-            <small>{overview.sapHost || 'No SAP host configured'}. Sending to customers is limited to the customers and numbers approved on the server.</small>
-          </div>
-        </div>
-      )}
-      {overview ? <InternalNumbers rows={overview.internalRecipients} onChanged={load} /> : !error && <p className="set-note">Loading…</p>}
-    </>
-  );
-}
-
-function HelpAlertRecipient({ settings }: { settings: HelpRequestAlertSettings }) {
-  return (
-    <div className="set-status set-recipient">
-      <div>
-        <strong>Need Help alert number</strong>
-        <p className="set-recipient__number mono">{settings.formattedRecipient || settings.recipient || 'Not configured'}</p>
-        <small>Customer and invoice details are sent here when a customer taps Need Help.</small>
-      </div>
-    </div>
-  );
-}
-
-function SettingsSection({ id, title, description, action, children }: { id: string; title: string; description?: string; action?: ReactNode; children: ReactNode }) {
-  return (
-    <section className="set-section" id={id} role="tabpanel" aria-labelledby={`${id}-tab`}>
-      <header className="set-section__head">
-        <div>
-          <h2 id={`${id}-title`}>{title}</h2>
-          {description && <p>{description}</p>}
-        </div>
-        {action}
-      </header>
-      {children}
-    </section>
-  );
-}
-
-type TimeUnit = 'seconds' | 'minutes' | 'hours' | 'days';
-const UNIT_SECONDS: Record<TimeUnit, number> = { seconds: 1, minutes: 60, hours: 3600, days: 86_400 };
-const MIN_DELAY_SECONDS = 10;
-const MAX_DELAY_SECONDS = 30 * 86_400;
-
-function splitDuration(seconds: number): { amount: string; unit: TimeUnit } {
-  const unit: TimeUnit = seconds % UNIT_SECONDS.days === 0 ? 'days'
-    : seconds % UNIT_SECONDS.hours === 0 ? 'hours'
-      : seconds % UNIT_SECONDS.minutes === 0 ? 'minutes'
-        : 'seconds';
-  return { amount: String(Math.max(1, Math.round(seconds / UNIT_SECONDS[unit]))), unit };
-}
-
-function formatDuration(seconds: number): string {
-  const { amount, unit } = splitDuration(seconds);
-  return `${amount} ${Number(amount) === 1 ? unit.slice(0, -1) : unit}`;
-}
-
-function reminderCountLabel(count: number): string {
-  return `${count} ${count === 1 ? 'reminder' : 'reminders'}`;
-}
-
-function reminderSummary(firstSeconds: number, repeatSeconds: number, maximum: number): string {
-  if (maximum === 1) return `1 reminder, ${formatDuration(firstSeconds)} after the invoice`;
-  return `First ${formatDuration(firstSeconds)} after the invoice, then every ${formatDuration(repeatSeconds)} · up to ${reminderCountLabel(maximum)}`;
-}
-
-function ReminderTimingForm({ config, onSaved }: { config: PaymentFollowUpConfig; onSaved: () => Promise<void> }) {
-  const [first, setFirst] = useState(() => splitDuration(config.firstReminderDelaySeconds));
-  const [repeat, setRepeat] = useState(() => splitDuration(config.repeatReminderDelaySeconds));
-  const [maximum, setMaximum] = useState(String(config.maximumTestReminders));
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
-
-  const firstSeconds = Number(first.amount) * UNIT_SECONDS[first.unit];
-  const repeatSeconds = Number(repeat.amount) * UNIT_SECONDS[repeat.unit];
-  const maximumCount = Number(maximum);
-  const problem =
-    !Number.isInteger(firstSeconds) || firstSeconds < MIN_DELAY_SECONDS || firstSeconds > MAX_DELAY_SECONDS ? 'The first reminder must be between 10 seconds and 30 days.'
-      : !Number.isInteger(repeatSeconds) || repeatSeconds < MIN_DELAY_SECONDS || repeatSeconds > MAX_DELAY_SECONDS ? 'The time between reminders must be between 10 seconds and 30 days.'
-        : !Number.isInteger(maximumCount) || maximumCount < 1 || maximumCount > 10 ? 'Send between 1 and 10 reminders.'
-          : '';
-  const changed =
-    firstSeconds !== config.firstReminderDelaySeconds
-    || repeatSeconds !== config.repeatReminderDelaySeconds
-    || maximumCount !== config.maximumTestReminders;
-
-  async function save(event: FormEvent) {
-    event.preventDefault();
-    if (problem || !changed) return;
-    setSaving(true);
-    setMessage(null);
-    try {
-      await apiRequest<ReminderSettings>('/payment-follow-up/settings', {
-        method: 'PUT',
-        body: JSON.stringify({
-          firstReminderDelaySeconds: firstSeconds,
-          repeatReminderDelaySeconds: repeatSeconds,
-          maximumReminders: maximumCount,
-        }),
-      });
-      await onSaved();
-    } catch (saveError) {
-      setMessage({ tone: 'error', text: toMessage(saveError) });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function reset() {
-    setFirst(splitDuration(config.firstReminderDelaySeconds));
-    setRepeat(splitDuration(config.repeatReminderDelaySeconds));
-    setMaximum(String(config.maximumTestReminders));
-    setMessage(null);
-  }
-
-  return (
-    <form className="set-timing" onSubmit={(event) => void save(event)}>
-      <div className="set-timing__grid">
-        <DurationField label="First reminder" hint="after the invoice is sent" value={first} onChange={setFirst} />
-        <DurationField label="Then every" hint="until paid or the limit is reached" value={repeat} onChange={setRepeat} disabled={maximumCount === 1} />
-        <label className="field">
-          <span>Send at most</span>
-          <div className="set-timing__pair">
-            <input type="number" min={1} max={10} step={1} inputMode="numeric" value={maximum} onChange={(event) => setMaximum(event.target.value)} />
-            <span className="set-timing__suffix">reminders</span>
-          </div>
-          <small>per invoice</small>
-        </label>
-      </div>
-      <p className={`set-timing__summary${problem ? ' set-timing__summary--bad' : ''}`}>
-        {problem || reminderSummary(firstSeconds, repeatSeconds, maximumCount)}
-      </p>
-      <div className="set-timing__foot">
-        <small>
-          {config.reminderSettingsSource === 'saved'
-            ? `Last changed ${formatDateTime(config.reminderSettingsUpdatedAt)}.`
-            : 'Using the server defaults.'}
-          {' '}Changes apply to the next reminder that gets scheduled.
-        </small>
-        {message && <small className={message.tone === 'error' ? 'text-danger' : ''}>{message.text}</small>}
-        <div className="set-timing__actions">
-          <button className="button button--secondary" type="button" disabled={saving || !changed} onClick={reset}>Reset</button>
-          <button className="button button--primary" type="submit" disabled={saving || !changed || Boolean(problem)}>{saving ? 'Saving…' : 'Save'}</button>
-        </div>
-      </div>
-    </form>
-  );
-}
-
-function DurationField({
-  label,
-  hint,
-  value,
-  onChange,
-  disabled = false,
+function Tabs({
+  active,
+  badges,
+  onSelect,
 }: {
-  label: string;
-  hint: string;
-  value: { amount: string; unit: TimeUnit };
-  onChange: (value: { amount: string; unit: TimeUnit }) => void;
-  disabled?: boolean;
+  active: TabId;
+  badges: Partial<Record<TabId, { tone: 'warn' | 'bad'; count: number }>>;
+  onSelect: (id: TabId) => void;
 }) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      <div className="set-timing__pair">
-        <input type="number" min={1} step={1} inputMode="numeric" disabled={disabled} value={value.amount} onChange={(event) => onChange({ ...value, amount: event.target.value })} aria-label={`${label} amount`} />
-        <select disabled={disabled} value={value.unit} onChange={(event) => onChange({ ...value, unit: event.target.value as TimeUnit })} aria-label={`${label} unit`}>
-          <option value="seconds">seconds</option>
-          <option value="minutes">minutes</option>
-          <option value="hours">hours</option>
-          <option value="days">days</option>
-        </select>
-      </div>
-      <small>{hint}</small>
-    </label>
-  );
-}
+  const refs = useRef<Partial<Record<TabId, HTMLButtonElement | null>>>({});
 
-function AutomationRow({ icon: Icon, name, detail, state }: { icon: LucideIcon; name: string; detail: string; state: State }) {
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const index = TABS.findIndex((tab) => tab.id === active);
+    let next = index;
+    if (event.key === 'ArrowRight') next = (index + 1) % TABS.length;
+    else if (event.key === 'ArrowLeft') next = (index - 1 + TABS.length) % TABS.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = TABS.length - 1;
+    else return;
+    event.preventDefault();
+    const target = TABS[next];
+    if (!target) return;
+    onSelect(target.id);
+    refs.current[target.id]?.focus();
+  }
+
   return (
-    <li className="set-row">
-      <span className="set-row__icon"><Icon size={16} aria-hidden="true" /></span>
-      <span className="set-row__text"><strong>{name}</strong><small>{detail}</small></span>
-      <span className={`wa-state wa-state--${state}`}>{STATE_LABEL[state]}</span>
-    </li>
+    <div className="st-tabs" role="tablist" aria-label="Settings sections" onKeyDown={onKeyDown}>
+      {TABS.map((tab) => {
+        const badge = badges[tab.id];
+        const selected = active === tab.id;
+        return (
+          <button
+            key={tab.id}
+            ref={(node) => { refs.current[tab.id] = node; }}
+            id={`tab-${tab.id}`}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            aria-controls={`panel-${tab.id}`}
+            tabIndex={selected ? 0 : -1}
+            className="st-tab"
+            onClick={() => onSelect(tab.id)}
+          >
+            {tab.label}
+            {badge && (
+              <span className={`st-tab__badge st-tab__badge--${badge.tone}`} aria-label={`${badge.count} to review`}>{badge.count}</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
   );
 }
