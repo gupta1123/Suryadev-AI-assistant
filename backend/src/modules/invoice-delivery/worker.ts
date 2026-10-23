@@ -90,14 +90,14 @@ async function processClaimedJob(job: Awaited<ReturnType<typeof claimNextDeliver
   ) {
     throw new Error('Delivery worker refused a recipient outside the test allowlist');
   }
-  // Settings-managed approval: customer enabled, SAP phone unchanged since it was
-  // approved, and the document created after the customer was enabled. Read fresh.
-  await assertDocumentSendAllowed({
+  // Check before preparing anything, then again at the HTTP dispatch boundary.
+  const assertApproved = () => assertDocumentSendAllowed({
     source: jobSource(context.metadata),
     customerNumber: context.customer.sap_customer_number,
     recipient,
     documentCreatedAt: context.invoice.creation_datetime,
   });
+  await assertApproved();
 
   const documentDefinition = getBillingDocumentDefinition(context.invoice.billing_document_type);
   if (!documentDefinition) {
@@ -140,7 +140,7 @@ async function processClaimedJob(job: Awaited<ReturnType<typeof claimNextDeliver
   );
 
   try {
-    const result = await sendInvoiceTemplate(templateInput);
+    const result = await sendInvoiceTemplate(templateInput, assertApproved);
     if (result.ok) {
       await markDeliveryAccepted({
         jobId: context.id,

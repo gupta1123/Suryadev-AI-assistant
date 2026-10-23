@@ -200,6 +200,7 @@ export function buildMsg91HelpRequestAlertPayload(
 
 export async function sendInvoiceTemplate(
   input: Msg91TemplateInput,
+  beforeSend: () => Promise<unknown>,
   timeoutMs = 20_000,
 ): Promise<Msg91SendResult> {
   if (!env.MSG91_AUTHKEY || !digitsOnly(env.MSG91_INTEGRATED_NUMBER)) {
@@ -209,11 +210,12 @@ export async function sendInvoiceTemplate(
     throw new Error('MSG91 real sending is disabled');
   }
 
-  return sendTemplatePayload(buildMsg91InvoicePayload(input), timeoutMs);
+  return sendTemplatePayload(buildMsg91InvoicePayload(input), timeoutMs, beforeSend);
 }
 
 export async function sendPaymentReminderTemplate(
   input: Msg91PaymentReminderInput,
+  beforeSend: () => Promise<unknown>,
   timeoutMs = 20_000,
 ): Promise<Msg91SendResult> {
   if (!env.MSG91_AUTHKEY || !digitsOnly(env.MSG91_INTEGRATED_NUMBER)) {
@@ -222,7 +224,7 @@ export async function sendPaymentReminderTemplate(
   if (!env.MSG91_SEND_ENABLED || !env.PAYMENT_FOLLOW_UP_SEND_ENABLED) {
     throw new Error('Payment reminder sending is disabled');
   }
-  return sendTemplatePayload(buildMsg91PaymentReminderPayload(input), timeoutMs);
+  return sendTemplatePayload(buildMsg91PaymentReminderPayload(input), timeoutMs, beforeSend);
 }
 
 export async function sendHelpRequestAlertTemplate(
@@ -241,7 +243,13 @@ export async function sendHelpRequestAlertTemplate(
 export async function sendTemplatePayload(
   payload: Record<string, unknown>,
   timeoutMs: number,
+  beforeSend?: () => Promise<unknown>,
 ): Promise<Msg91SendResult> {
+  const requestBody = JSON.stringify(payload);
+  // Fail closed BEFORE the network try/catch and timeout start. A policy refusal
+  // is not an ambiguous provider outcome, and must never issue an HTTP request.
+  // No awaited preparation may be inserted between this check and fetch.
+  if (beforeSend) await beforeSend();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -253,7 +261,7 @@ export async function sendTemplatePayload(
         authkey: env.MSG91_AUTHKEY,
         'content-type': 'application/json',
       },
-      body: JSON.stringify(payload),
+      body: requestBody,
       signal: controller.signal,
     });
     const body = await readResponseBody(response);

@@ -67,7 +67,7 @@ export function TeamTab({
 
       <Card
         title="Your team’s phone numbers"
-        description="Use these to try things out without messaging customers. Choose what each number is allowed to receive."
+        description="Choose what each test number may receive. The associated customer must also be enabled in Customers; these permissions never override a customer being off."
         flush
       >
         {messagingError && <div className="alert alert--error" role="alert">{messagingError}</div>}

@@ -5,8 +5,54 @@ import {
   buildMsg91HelpRequestAlertPayload,
   buildMsg91PaymentReminderPayload,
   sanitizeMsg91Payload,
+  sendTemplatePayload,
 } from './msg91-client.js';
 import { env } from '../../config/env.js';
+
+describe('last-moment send approval (mock HTTP only)', () => {
+  it('never calls MSG91 when the final approval rejects', async (t) => {
+    const http = t.mock.method(globalThis, 'fetch', async () => new Response('{}'));
+    try {
+      await assert.rejects(sendTemplatePayload({}, 1000, async () => {
+        throw new Error('customer is not enabled in Settings');
+      }), /not enabled/);
+      assert.equal(http.mock.callCount(), 0);
+    } finally {
+      http.mock.restore();
+    }
+  });
+
+  it('fails closed on an approval read error, without an HTTP request', async (t) => {
+    const http = t.mock.method(globalThis, 'fetch', async () => new Response('{}'));
+    try {
+      await assert.rejects(sendTemplatePayload({}, 1000, async () => {
+        throw new Error('approval database unavailable');
+      }), /database unavailable/);
+      assert.equal(http.mock.callCount(), 0);
+    } finally {
+      http.mock.restore();
+    }
+  });
+
+  it('waits for final approval and dispatches immediately after it', async (t) => {
+    const events: string[] = [];
+    const http = t.mock.method(globalThis, 'fetch', async () => {
+      events.push('http');
+      return new Response('{}', { status: 200 });
+    });
+    try {
+      const result = await sendTemplatePayload({}, 1000, async () => {
+        await Promise.resolve();
+        events.push('approved');
+      });
+      assert.equal(result.ok, true);
+      assert.deepEqual(events, ['approved', 'http']);
+      assert.equal(http.mock.callCount(), 1);
+    } finally {
+      http.mock.restore();
+    }
+  });
+});
 
 describe('MSG91 invoice template payload', () => {
   it('maps the approved document template variables exactly once', () => {

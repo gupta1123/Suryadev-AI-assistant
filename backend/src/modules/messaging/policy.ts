@@ -44,6 +44,25 @@ export const CREATED_BEFORE_ENABLED = 'document was created before this customer
 const digits = (value: string | null | undefined) => (value ?? '').replace(/\D/g, '');
 const deny = (reason: string) => ({ allowed: false as const, reason });
 
+// Customer approval applies to every document/reminder, including fixtures.
+// Team-number approval is an additional restriction, never a customer bypass.
+export function evaluateCustomerMessaging(
+  ceilings: Ceilings,
+  customerNumber: string,
+  setting: CustomerMessagingSetting | null,
+): Decision {
+  if (ceilings.mode === 'test' && !ceilings.customers.has(customerNumber)) {
+    return deny('customer is outside the server-approved customers');
+  }
+  if (!setting?.enabled || setting.sapCustomerNumber !== customerNumber) {
+    return deny('customer is not enabled in Settings');
+  }
+  if (!setting.approvedPhone || !setting.enabledAt) {
+    return deny('customer has no approved phone number in Settings');
+  }
+  return { allowed: true, route: 'customer' };
+}
+
 export function evaluateDocumentSend(
   ceilings: Ceilings,
   input: {
@@ -61,6 +80,8 @@ export function evaluateDocumentSend(
   if (test && !ceilings.phones.has(recipient)) {
     return deny('recipient is outside the server-approved test numbers');
   }
+  const customerApproval = evaluateCustomerMessaging(ceilings, input.customerNumber, input.setting);
+  if (!customerApproval.allowed) return customerApproval;
 
   const internalApproved = Boolean(input.internal?.allowSimulator) &&
     digits(input.internal?.phone) === recipient;
@@ -71,12 +92,8 @@ export function evaluateDocumentSend(
       : deny('sample documents may only go to an internal test number approved in Settings');
   }
 
-  if (test && !ceilings.customers.has(input.customerNumber)) {
-    return deny('customer is outside the server-approved customers');
-  }
   const setting = input.setting;
-  if (!setting?.enabled) return deny('customer is not enabled in Settings');
-  if (!setting.approvedPhone || !setting.enabledAt) {
+  if (!setting?.approvedPhone || !setting.enabledAt) {
     return deny('customer has no approved phone number in Settings');
   }
 
@@ -123,9 +140,13 @@ export function evaluateManagerCopy(
 
 export function evaluatePaymentRecipient(
   ceilings: Ceilings,
+  customerNumber: string,
   recipient: string,
+  setting: CustomerMessagingSetting | null,
   internal: InternalRecipient | null,
 ): Decision {
+  const customerApproval = evaluateCustomerMessaging(ceilings, customerNumber, setting);
+  if (!customerApproval.allowed) return customerApproval;
   const phone = digits(recipient);
   if (!phone) return deny('recipient is missing');
   if (!ceilings.paymentPhones.has(phone) || !ceilings.phones.has(phone)) {

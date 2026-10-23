@@ -73,7 +73,8 @@ async function processClaimedPaymentJob(
   const context = await getDeliveryJobContext(job);
   const recipient = digitsOnly(String(context.metadata.actual_recipient ?? ''));
   assertAllowedPaymentRecipient(recipient);
-  await assertPaymentRecipientApproved(recipient);
+  const assertApproved = () => assertPaymentRecipientApproved(context.customer.sap_customer_number, recipient);
+  await assertApproved();
   if (!context.payment_follow_up_case_id) {
     throw new Error('Payment reminder job has no follow-up case');
   }
@@ -106,7 +107,7 @@ async function processClaimedPaymentJob(
   );
 
   try {
-    const result = await sendPaymentReminderTemplate(templateInput);
+    const result = await sendPaymentReminderTemplate(templateInput, assertApproved);
     if (result.ok) {
       await markDeliveryAccepted({
         jobId: context.id,

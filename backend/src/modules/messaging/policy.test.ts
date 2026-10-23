@@ -126,10 +126,17 @@ describe('document send approval', () => {
   });
 
   it('only sends sample documents to an approved internal number', () => {
-    const base = { source: 'fixture' as const, setting: null, recipient: TEAM };
+    const base = { source: 'fixture' as const, setting: setting(), recipient: TEAM };
     assert.equal(send({ ...base, internal: internal() }).allowed, true);
     assert.equal(send({ ...base, internal: null }).allowed, false);
     assert.equal(send({ ...base, recipient: CLIENT, internal: null }).allowed, false);
+  });
+
+  it('never lets a sample bypass a disabled, missing or mismatched customer approval', () => {
+    for (const approval of [null, setting({ enabled: false }), setting({ sapCustomerNumber: 'OTHER' })]) {
+      assert.equal(send({ source: 'fixture', recipient: TEAM, internal: internal(), setting: approval }).allowed, false);
+    }
+    assert.equal(send({ source: 'fixture', recipient: TEAM, internal: internal() }, ceilings({ customers: new Set() })).allowed, false);
   });
 
   it('still requires an enabled customer in production mode', () => {
@@ -172,12 +179,31 @@ describe('per-client marketing manager copy', () => {
 });
 
 describe('payment reminder recipients', () => {
-  it('needs the env ceiling and the Settings approval', () => {
-    assert.equal(evaluatePaymentRecipient(ceilings(), TEAM, internal()).allowed, true);
-    assert.equal(evaluatePaymentRecipient(ceilings(), TEAM, internal({ allowPaymentReminders: false })).allowed, false);
-    assert.equal(evaluatePaymentRecipient(ceilings(), TEAM, null).allowed, false);
-    assert.equal(evaluatePaymentRecipient(ceilings({ paymentPhones: new Set() }), TEAM, internal()).allowed, false);
-    assert.equal(evaluatePaymentRecipient(ceilings(), CLIENT, internal({ phone: CLIENT })).allowed, false);
+  const payment = (approval: CustomerMessagingSetting | null = setting(), recipient = internal(), c = ceilings()) =>
+    evaluatePaymentRecipient(c, CUSTOMER, TEAM, approval, recipient);
+
+  it('needs both customer approval and the existing recipient approvals', () => {
+    assert.equal(payment().allowed, true);
+    assert.equal(payment(setting(), internal({ allowPaymentReminders: false })).allowed, false);
+    assert.equal(evaluatePaymentRecipient(ceilings(), CUSTOMER, TEAM, setting(), null).allowed, false);
+    assert.equal(payment(setting(), internal(), ceilings({ paymentPhones: new Set() })).allowed, false);
+    assert.equal(evaluatePaymentRecipient(ceilings(), CUSTOMER, CLIENT, setting(), internal({ phone: CLIENT })).allowed, false);
+  });
+
+  it('refuses existing reminders after disabling, even for an approved team number', () => {
+    assert.equal(payment(setting({ enabled: false })).allowed, false);
+    assert.equal(payment(null).allowed, false);
+    assert.equal(payment(setting({ sapCustomerNumber: 'OTHER' })).allowed, false);
+    assert.equal(payment(setting({ approvedPhone: null })).allowed, false);
+    assert.equal(payment(setting({ enabledAt: null })).allowed, false);
+  });
+
+  it('cannot widen the server customer ceiling', () => {
+    assert.equal(payment(setting(), internal(), ceilings({ customers: new Set() })).allowed, false);
+  });
+
+  it('still refuses a disabled customer in production', () => {
+    assert.equal(payment(setting({ enabled: false }), internal(), ceilings({ mode: 'production' })).allowed, false);
   });
 });
 

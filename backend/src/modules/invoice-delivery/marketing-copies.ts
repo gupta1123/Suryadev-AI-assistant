@@ -106,19 +106,21 @@ export async function processMarketingCopyQueue(): Promise<void> {
       try {
         const payload = structuredClone(row.payload) as TemplatePayload;
         const sourceContext = await getDeliveryJobContextById(Number(row.source_job_id));
-        // The manager and customer approvals are re-read right before dispatch, so a
-        // disabled customer or a changed manager stops a copy that was queued earlier.
-        await assertManagerCopyStillAllowed(
-          sourceContext.customer.sap_customer_number,
-          String(row.recipient),
-        );
         const header = payload.payload.template.to_and_components[0]!.components.header_1;
         if (header?.type === 'document') {
           header.value = await createInvoiceDocumentUrl(sourceContext);
         }
         // This path sends only internal copies and never calls the customer workers.
-        dispatched = true;
-        const result = await sendTemplatePayload(payload as unknown as Record<string, unknown>, 20_000);
+        const result = await sendTemplatePayload(
+          payload as unknown as Record<string, unknown>,
+          20_000,
+          async () => {
+            // After ALL preparation, check the live manager and fresh customer
+            // switch. Do not repeat the slow SAP lookup before preparing the PDF.
+            await assertManagerCopyStillAllowed(sourceContext.customer.sap_customer_number, String(row.recipient));
+            dispatched = true;
+          },
+        );
         const retryable = !result.ambiguous && (result.statusCode === 429 || result.statusCode >= 500) && Number(row.attempt_count) < 5;
         await save(Number(row.id), {
           status: result.ok ? 'accepted' : result.ambiguous ? 'unknown' : retryable ? 'pending' : 'failed',

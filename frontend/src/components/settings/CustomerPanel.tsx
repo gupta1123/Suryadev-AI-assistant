@@ -176,11 +176,11 @@ function statusSentence(row: CustomerRow): string {
   const setting = row.messaging?.setting;
   switch (row.status) {
     case 'enabled':
-      return `Invoices and memos for this customer go to ${formatPhone(row.phone)}. Only documents created since ${formatDateTime(setting?.enabledAt)} are sent.`;
+      return `Eligible invoices and memos go to ${formatPhone(row.phone)}. Only documents created since ${formatDateTime(setting?.enabledAt)} are sent. Payment reminders also require this switch to be on and their separate reminder approvals.`;
     case 'review':
-      return `SAP now lists ${formatPhone(row.phone)}, but you approved ${formatPhone(setting?.approvedPhone)}. Nothing is sent until you approve the new number.`;
+      return `SAP now lists ${formatPhone(row.phone)}, but you approved ${formatPhone(setting?.approvedPhone)}. New automatic documents are blocked until you approve the new number. Turn messaging off to also block existing reminders and queued document sends.`;
     case 'off':
-      return 'Nothing is sent to this customer. Turn messaging on to start sending their invoices and memos.';
+      return 'New invoice, memo, reminder, sample-document sends and manager copies are blocked. Messages already handed to WhatsApp cannot be recalled. Customer-initiated Need Help alerts are handled separately.';
     case 'locked':
       return `This customer isn’t on the server’s approved list, so it can’t be turned on here. Ask your technical admin to add SAP customer ${row.number}.`;
     default:
@@ -276,12 +276,13 @@ function ConfirmMessaging({
           <p className="st-confirm__number mono">{formatPhone(row.phone)}</p>
           <ul className="st-bullets">
             <li>Only documents created from this moment on are sent — older ones are not.</li>
-            <li>If SAP later reports a different number, sending pauses until you approve it again.</li>
+            <li>If SAP later reports a different number, new automatic documents pause until you approve it again.</li>
             <li>We can’t tell whether this number is on WhatsApp.</li>
+            <li>Payment reminders and sample documents also need this customer enabled, plus their separate test/reminder approvals.</li>
           </ul>
         </>
       ) : (
-        <p>No new messages will be sent to {row.name}, and their marketing manager won’t get copies. Messages already sent aren’t affected.</p>
+        <p>Block new invoices, memos, payment reminders, sample documents and manager copies for {row.name}, including queued items checked after saving. Messages already handed to WhatsApp cannot be recalled. Customer-initiated Need Help alerts are handled separately.</p>
       )}
       {error && <LiveNote tone="bad">{error}</LiveNote>}
       <div className="modal-footer">

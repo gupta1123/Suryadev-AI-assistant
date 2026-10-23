@@ -49,7 +49,7 @@ export async function assertDocumentSendAllowed(input: {
 }): Promise<'customer' | 'internal'> {
   const recipient = digitsOnly(input.recipient);
   const [setting, internal] = await Promise.all([
-    input.source === 'sap' ? getCustomerSetting(input.customerNumber) : Promise.resolve(null),
+    getCustomerSetting(input.customerNumber),
     getInternalRecipient(recipient),
   ]);
   const decision = evaluateDocumentSend(currentCeilings(), { ...input, recipient, setting, internal });
@@ -97,7 +97,10 @@ async function currentManagerCopyDecision(customerNumber: string, queuedRecipien
   if (!setting?.enabled) return { allowed: false, reason: 'customer is not enabled in Settings' };
   try {
     const assignments = await readCurrentSapManagerAssignments(customerNumber);
-    return evaluateSapManagerCopy(currentCeilings(), setting, assignments, queuedRecipient);
+    // The SAP call can be slow. Re-read approval AFTER it, so disabling while
+    // the lookup is running cannot leave an old enabled snapshot in use.
+    const latestSetting = await getCustomerSetting(customerNumber);
+    return evaluateSapManagerCopy(currentCeilings(), latestSetting, assignments, queuedRecipient);
   } catch {
     // A manager-lookup outage must not fall back to an unrelated internal
     // recipient or prevent the separately approved customer message.
@@ -114,12 +117,18 @@ export async function assertManagerCopyStillAllowed(
   if (!decision.allowed) throw new MessagingRefusal(decision.reason);
 }
 
-export async function assertPaymentRecipientApproved(recipient: string): Promise<void> {
+export async function assertPaymentRecipientApproved(customerNumber: string, recipient: string): Promise<void> {
   const phone = digitsOnly(recipient);
+  const [setting, internal] = await Promise.all([
+    getCustomerSetting(customerNumber),
+    getInternalRecipient(phone),
+  ]);
   const decision = evaluatePaymentRecipient(
     currentCeilings(),
+    customerNumber,
     phone,
-    await getInternalRecipient(phone),
+    setting,
+    internal,
   );
   if (!decision.allowed) throw new MessagingRefusal(decision.reason);
 }
