@@ -6,32 +6,6 @@ export function Pill({ tone, children }: { tone: Tone; children: ReactNode }) {
   return <span className={`st-pill st-pill--${tone}`}>{children}</span>;
 }
 
-export function Switch({
-  checked,
-  onChange,
-  disabled = false,
-  label,
-}: {
-  checked: boolean;
-  onChange: (next: boolean) => void;
-  disabled?: boolean;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      disabled={disabled}
-      className={`st-switch${checked ? ' st-switch--on' : ''}`}
-      onClick={() => onChange(!checked)}
-    >
-      <span className="st-switch__knob" aria-hidden="true" />
-    </button>
-  );
-}
-
 export function Card({
   title,
   description,

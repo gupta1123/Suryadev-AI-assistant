@@ -5,7 +5,6 @@ import { CustomersTab } from '../components/settings/CustomersTab';
 import { buildIssues, type TabId } from '../components/settings/health';
 import { OverviewTab } from '../components/settings/OverviewTab';
 import { RemindersTab } from '../components/settings/RemindersTab';
-import { TeamTab } from '../components/settings/TeamTab';
 import { Pill } from '../components/settings/ui';
 import { apiRequest } from '../lib/api';
 import { toMessage } from '../lib/format';
@@ -25,7 +24,6 @@ const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'customers', label: 'Customers' },
   { id: 'reminders', label: 'Reminders' },
   { id: 'connections', label: 'Connections' },
-  { id: 'team', label: 'Team' },
 ];
 
 // Addresses from the previous seven-section layout keep working.
@@ -34,8 +32,9 @@ const LEGACY_HASHES: Record<string, TabId> = {
   sap: 'connections',
   formats: 'connections',
   'sap-masters': 'customers',
-  'test-numbers': 'team',
-  account: 'team',
+  'test-numbers': 'overview',
+  team: 'overview',
+  account: 'overview',
 };
 
 function tabFromHash(): TabId {
@@ -163,6 +162,9 @@ export function SettingsPage({
               messaging={messaging}
               issues={issues}
               onGo={openTab}
+              user={user}
+              onLogout={onLogout}
+              loggingOut={loggingOut}
             />
           )}
           {activeTab === 'customers' && (
@@ -178,16 +180,6 @@ export function SettingsPage({
               messaging={messaging}
               onCheckTemplates={checkTemplates}
               onRefresh={load}
-            />
-          )}
-          {activeTab === 'team' && (
-            <TeamTab
-              messaging={messaging}
-              messagingError={messagingError}
-              onReload={load}
-              user={user}
-              onLogout={onLogout}
-              loggingOut={loggingOut}
             />
           )}
         </div>

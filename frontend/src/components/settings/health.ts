@@ -7,7 +7,7 @@ import type {
 } from '../../types';
 import type { Tone } from './ui';
 
-export type TabId = 'overview' | 'customers' | 'reminders' | 'connections' | 'team';
+export type TabId = 'overview' | 'customers' | 'reminders' | 'connections';
 
 export type Issue = {
   id: string;

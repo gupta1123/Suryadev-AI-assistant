@@ -7,6 +7,7 @@ import {
   Info,
   LifeBuoy,
   Lock,
+  LogOut,
   OctagonAlert,
   type LucideIcon,
 } from 'lucide-react';
@@ -23,6 +24,7 @@ import {
 import { Card, Pill, Skeleton } from './ui';
 import { formatPhone, formatRelative } from '../../lib/format';
 import type {
+  AdminUser,
   BillingDocumentTemplateReadiness,
   DeliveryConfig,
   HelpRequestAlertSettings,
@@ -41,6 +43,9 @@ export function OverviewTab({
   messaging,
   issues,
   onGo,
+  user,
+  onLogout,
+  loggingOut,
 }: {
   config: DeliveryConfig | null;
   paymentConfig: PaymentFollowUpConfig | null;
@@ -51,6 +56,9 @@ export function OverviewTab({
   messaging: MessagingOverview | null;
   issues: Issue[];
   onGo: (tab: TabId) => void;
+  user: AdminUser;
+  onLogout: () => Promise<void>;
+  loggingOut: boolean;
 }) {
   if (!config) return <Skeleton rows={4} />;
 
@@ -191,6 +199,19 @@ export function OverviewTab({
         <p className="st-foot-note">
           <Lock size={13} aria-hidden="true" /> The On/Off switches for these are controlled by your technical admin on the server.
         </p>
+      </Card>
+
+      <Card title="Your account">
+        <div className="st-account">
+          <span className="account-avatar" aria-hidden="true">AD</span>
+          <div>
+            <strong>{user.displayName}</strong>
+            <small>Signed in as @{user.username}</small>
+          </div>
+          <button className="button button--secondary" type="button" disabled={loggingOut} onClick={() => void onLogout()}>
+            <LogOut size={15} aria-hidden="true" /> {loggingOut ? 'Signing out…' : 'Sign out'}
+          </button>
+        </div>
       </Card>
     </div>
   );
