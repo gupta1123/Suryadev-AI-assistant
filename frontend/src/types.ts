@@ -620,6 +620,7 @@ export type MessagingCustomer = {
   status: 'locked' | 'not_enabled' | 'enabled' | 'phone_changed';
   setting: MessagingSetting | null;
   managerPhoneApproved: boolean;
+  managerCopy?: { source: 'manual' | 'sap'; recipient: string | null; allowed: boolean; reason: string | null };
 };
 
 export type InternalRecipientRow = {

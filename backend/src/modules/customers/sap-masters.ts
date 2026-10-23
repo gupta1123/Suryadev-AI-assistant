@@ -1,6 +1,6 @@
 import { env, isSapConfigured } from '../../config/env.js';
 import { HttpError } from '../../lib/http.js';
-import { SapODataClient, type ODataRecord } from '../invoice-delivery/sap-client.js';
+import { escapeODataString, SapODataClient, type ODataRecord } from '../invoice-delivery/sap-client.js';
 import { choosePhone } from '../invoice-delivery/sap-source.js';
 import { normalizeIndianPhone } from '../invoice-delivery/fixture-source.js';
 
@@ -50,24 +50,7 @@ export async function readSapMasterCustomers(client: Client, managerClient: Clie
   if ([customers, addresses, phones, salesAreas].some((rows) => rows.length >= MAX_ROWS)) {
     throw new HttpError(502, 'SAP master directory exceeds the supported size; no partial list is displayed');
   }
-  const assignments = new Map<string, SapSalesAssignment[]>();
-  for (const area of salesAreas) {
-    const salesGroup = text(area.SalesGroup);
-    const salesOffice = text(area.SalesOffice);
-    // SAP can maintain both 8 and 08. Only combine equivalent keys when the
-    // office matches; conflicting mobile numbers must never be silently picked.
-    const matches = salesGroup ? managers.rows.filter((manager) =>
-      groupKey(text(manager.SalesGroupid)) === groupKey(salesGroup) && text(manager.SalesOffice) === salesOffice) : [];
-    const numbers = [...new Set(matches.map((manager) => normalizeIndianPhone(text(manager.MobileNo))).filter(Boolean))];
-    const assignment: SapSalesAssignment = {
-      salesOrganization: text(area.SalesOrganization), distributionChannel: text(area.DistributionChannel), division: text(area.Division),
-      salesGroup, salesOffice,
-      marketingManagerPhone: managers.available && numbers.length === 1 ? numbers[0]! : null,
-      managerStatus: !managers.available ? 'unavailable' : numbers.length > 1 ? 'conflicting' : numbers.length === 1 ? 'mapped' : 'missing',
-    };
-    const customer = text(area.Customer);
-    assignments.set(customer, [...(assignments.get(customer) ?? []), assignment]);
-  }
+  const assignments = joinSalesAssignments(salesAreas, managers.rows, managers.available);
   const byAddress = new Map<string, ODataRecord[]>();
   for (const phone of phones) {
     const id = text(phone.AddressID);
@@ -99,14 +82,58 @@ export async function readSapMasterCustomers(client: Client, managerClient: Clie
   return { items, managerMappingAvailable: managers.available };
 }
 
+function joinSalesAssignments(salesAreas: ODataRecord[], managers: ODataRecord[], available: boolean) {
+  const assignments = new Map<string, SapSalesAssignment[]>();
+  for (const area of salesAreas) {
+    const salesGroup = text(area.SalesGroup);
+    const salesOffice = text(area.SalesOffice);
+    // SAP can maintain both 8 and 08. Only combine equivalent keys when the
+    // office matches; conflicting mobile numbers must never be silently picked.
+    const matches = salesGroup ? managers.filter((manager) =>
+      groupKey(text(manager.SalesGroupid)) === groupKey(salesGroup) && text(manager.SalesOffice) === salesOffice) : [];
+    const numbers = [...new Set(matches.map((manager) => normalizeIndianPhone(text(manager.MobileNo))).filter(Boolean))];
+    const assignment: SapSalesAssignment = {
+      salesOrganization: text(area.SalesOrganization), distributionChannel: text(area.DistributionChannel), division: text(area.Division),
+      salesGroup, salesOffice,
+      marketingManagerPhone: available && numbers.length === 1 ? numbers[0]! : null,
+      managerStatus: !available ? 'unavailable' : numbers.length > 1 ? 'conflicting' : numbers.length === 1 ? 'mapped' : 'missing',
+    };
+    const customer = text(area.Customer);
+    assignments.set(customer, [...(assignments.get(customer) ?? []), assignment]);
+  }
+  return assignments;
+}
+
+function salesGroupClient(customerClient: SapODataClient): SapODataClient {
+  return env.SAP_SALES_GROUP_API_USERNAME && env.SAP_SALES_GROUP_API_PASSWORD
+    ? new SapODataClient(env.SAP_API_BASE_URL, env.SAP_SALES_GROUP_API_USERNAME, env.SAP_SALES_GROUP_API_PASSWORD)
+    : customerClient;
+}
+
+// Read just this customer's sales areas at queue/dispatch time, not the full
+// 1,620-customer directory or its cached contact list. Always fail closed.
+export async function readCurrentSapManagerAssignments(customerNumber: string): Promise<SapSalesAssignment[]> {
+  if (!isSapConfigured) throw new HttpError(409, 'SAP API connection is not configured');
+  const customerClient = new SapODataClient();
+  const [areas, managers] = await Promise.all([
+    customerClient.collection('API_BUSINESS_PARTNER', 'A_CustomerSalesArea', {
+      filter: `Customer eq '${escapeODataString(customerNumber)}'`,
+      select: ['Customer', 'SalesOrganization', 'DistributionChannel', 'Division', 'SalesGroup', 'SalesOffice'], top: MAX_ROWS,
+    }),
+    salesGroupClient(customerClient).collection('YY1_SALESGROUP_CDS', 'YY1_SALESGROUP', {
+      select: ['SalesGroupid', 'SalesOffice', 'MobileNo'], top: MAX_ROWS,
+    }),
+  ]);
+  if ([areas, managers].some((rows) => rows.length >= MAX_ROWS)) throw new Error('SAP manager lookup returned a capped result');
+  return joinSalesAssignments(areas, managers, true).get(customerNumber) ?? [];
+}
+
 export async function getSapMasterCustomers(refresh = false) {
   if (!isSapConfigured) throw new HttpError(409, 'SAP API connection is not configured');
   if (!inFlight && (refresh || !cache || Date.now() - cache.loadedAt >= CACHE_MS)) {
     const customerClient = new SapODataClient();
     // Reuse the approved SAP host, but never replace the working billing login.
-    const managerClient = env.SAP_SALES_GROUP_API_USERNAME && env.SAP_SALES_GROUP_API_PASSWORD
-      ? new SapODataClient(env.SAP_API_BASE_URL, env.SAP_SALES_GROUP_API_USERNAME, env.SAP_SALES_GROUP_API_PASSWORD)
-      : customerClient;
+    const managerClient = salesGroupClient(customerClient);
     inFlight = readSapMasterCustomers(customerClient, managerClient).then((directory) => {
       cache = { ...directory, checkedAt: new Date().toISOString(), loadedAt: Date.now() };
       return cache;

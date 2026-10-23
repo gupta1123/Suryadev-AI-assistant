@@ -13,6 +13,7 @@ import { asyncHandler, HttpError } from '../../lib/http.js';
 import { type AuthenticatedRequest, requireAdmin } from '../../middleware/auth.js';
 import { getSapMasterCustomers, type SapMasterCustomer } from '../customers/sap-masters.js';
 import { currentCeilings } from './guard.js';
+import { evaluateSapManagerCopy } from './sap-manager-policy.js';
 import {
   type CustomerMessagingSetting,
   evaluateDocumentSend,
@@ -103,6 +104,9 @@ messagingRouter.get(
           const entry = live.get(customerNumber);
           const insideCeiling = env.DELIVERY_MODE !== 'test' || sapAllowedCustomers.has(customerNumber);
           const livePhone = entry?.primaryPhone ?? null;
+          const manager = env.MSG91_MARKETING_COPY_SOURCE === 'sap'
+            ? evaluateSapManagerCopy(currentCeilings(), setting, entry?.salesAssignments ?? [])
+            : evaluateManagerCopy(currentCeilings(), setting);
           return {
             customerNumber,
             name: entry?.name ?? null,
@@ -110,6 +114,12 @@ messagingRouter.get(
             insideCeiling,
             status: customerStatus(insideCeiling, setting, livePhone),
             setting,
+            managerCopy: {
+              source: env.MSG91_MARKETING_COPY_SOURCE,
+              recipient: manager.allowed ? manager.recipient : null,
+              allowed: manager.allowed && env.MSG91_MARKETING_COPY_ENABLED,
+              reason: !env.MSG91_MARKETING_COPY_ENABLED ? 'Manager copies are disabled on the server' : manager.allowed ? null : manager.reason,
+            },
             managerPhoneApproved:
               !setting?.managerPhone ||
               env.DELIVERY_MODE !== 'test' ||
@@ -156,7 +166,9 @@ messagingRouter.get(
           internal: await getInternalRecipient(livePhone),
         })
       : ({ allowed: false, reason: 'SAP has no phone number for this customer' } as const);
-    const manager = evaluateManagerCopy(ceilings, setting);
+    const manager = env.MSG91_MARKETING_COPY_SOURCE === 'sap'
+      ? evaluateSapManagerCopy(ceilings, setting, entry?.salesAssignments ?? [])
+      : evaluateManagerCopy(ceilings, setting);
     const check = (label: string, passed: boolean, detail?: string) => ({ label, passed, detail: detail ?? null });
     response.json({
       data: {
@@ -232,6 +244,9 @@ const managerSchema = z.union([
 messagingRouter.put(
   '/customers/:customerNumber/manager',
   asyncHandler(async (request: AuthenticatedRequest, response) => {
+    if (env.MSG91_MARKETING_COPY_SOURCE === 'sap') {
+      throw new HttpError(409, 'Manager copies use live SAP sales-group mappings. Update the manager in SAP, not a manual test assignment.');
+    }
     const customerNumber = customerNumberSchema.parse(request.params.customerNumber);
     const input = managerSchema.parse(request.body ?? {});
     requireCeilingCustomer(customerNumber);

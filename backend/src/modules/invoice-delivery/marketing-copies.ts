@@ -43,8 +43,8 @@ export async function enqueueMarketingCopy(
   customerNumber: string,
 ): Promise<void> {
   if (!env.MSG91_MARKETING_COPY_ENABLED) return;
-  // Each customer has its own marketing manager (assigned in Settings). There is
-  // deliberately no fallback manager: no manager means no copy.
+  // Use the configured source (live SAP or Settings), with no fallback manager.
+  // The resolver returns one unique recipient even if several sales areas agree.
   const { recipient } = await resolveManagerCopyRecipient(customerNumber);
   if (!recipient) return;
   const copy = buildMarketingCopyPayload(payload, recipient);

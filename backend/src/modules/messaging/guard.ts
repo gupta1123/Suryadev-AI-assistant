@@ -15,6 +15,8 @@ import {
   isHelpAlertRecipientPermitted as helpAlertPermitted,
 } from './policy.js';
 import { getCustomerSetting, getInternalRecipient } from './repository.js';
+import { readCurrentSapManagerAssignments } from '../customers/sap-masters.js';
+import { evaluateSapManagerCopy, type ManagerCopyDecision } from './sap-manager-policy.js';
 
 export function currentCeilings(): Ceilings {
   return {
@@ -83,10 +85,24 @@ export async function documentPollBlocker(candidate: {
 export async function resolveManagerCopyRecipient(
   customerNumber: string,
 ): Promise<{ recipient: string | null; reason?: string }> {
-  const decision = evaluateManagerCopy(currentCeilings(), await getCustomerSetting(customerNumber));
+  const decision = await currentManagerCopyDecision(customerNumber);
   return decision.allowed
     ? { recipient: decision.recipient }
     : { recipient: null, reason: decision.reason };
+}
+
+async function currentManagerCopyDecision(customerNumber: string, queuedRecipient?: string): Promise<ManagerCopyDecision> {
+  const setting = await getCustomerSetting(customerNumber);
+  if (env.MSG91_MARKETING_COPY_SOURCE !== 'sap') return evaluateManagerCopy(currentCeilings(), setting, queuedRecipient);
+  if (!setting?.enabled) return { allowed: false, reason: 'customer is not enabled in Settings' };
+  try {
+    const assignments = await readCurrentSapManagerAssignments(customerNumber);
+    return evaluateSapManagerCopy(currentCeilings(), setting, assignments, queuedRecipient);
+  } catch {
+    // A manager-lookup outage must not fall back to an unrelated internal
+    // recipient or prevent the separately approved customer message.
+    return { allowed: false, reason: 'live SAP manager lookup unavailable; no fallback copy is sent' };
+  }
 }
 
 /** Re-checked immediately before a queued manager copy is dispatched. */
@@ -94,11 +110,7 @@ export async function assertManagerCopyStillAllowed(
   customerNumber: string,
   queuedRecipient: string,
 ): Promise<void> {
-  const decision = evaluateManagerCopy(
-    currentCeilings(),
-    await getCustomerSetting(customerNumber),
-    queuedRecipient,
-  );
+  const decision = await currentManagerCopyDecision(customerNumber, queuedRecipient);
   if (!decision.allowed) throw new MessagingRefusal(decision.reason);
 }
 

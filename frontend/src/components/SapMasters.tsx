@@ -73,7 +73,7 @@ export function SapMasters() {
   return <>
     <div className="set-status">
       <div><strong>SAP customer directory</strong><small>{directory ? `${directory.items.length} customers · Last read ${formatDateTime(directory.checkedAt)}` : 'Read directly from SAP, not generated test records.'}</small></div>
-      <button type="button" className="button button--secondary" disabled={refreshing} onClick={() => void load(true)}><RefreshCw size={15} className={refreshing ? 'spin' : ''} aria-hidden="true" /> {refreshing ? 'Reading SAP…' : 'Refresh from SAP'}</button>
+      <button type="button" className="button button--secondary" disabled={refreshing} onClick={() => void load(true).then(loadOverview)}><RefreshCw size={15} className={refreshing ? 'spin' : ''} aria-hidden="true" /> {refreshing ? 'Reading SAP…' : 'Refresh from SAP'}</button>
     </div>
     {overviewError && <div className="alert alert--error" role="alert">Messaging controls could not be loaded: {overviewError}</div>}
     <p className="set-note">Read-only SAP contact numbers. Primary number follows the invoice sender’s SAP number selection. Listing a customer does not enable sending or confirm that a number is registered on WhatsApp.</p>
@@ -86,6 +86,7 @@ export function SapMasters() {
         <FilterSelect label="Marketing manager" value={managerFilter} options={[{ value: 'present', label: 'Number available' }, { value: 'missing', label: 'Number not available' }]} onChange={setManagerFilter} />
       </FilterBar>
       {managerFilter && <p className="set-note">Number available means at least one sales area has a marketing manager number. Number not available includes missing, conflicting or inaccessible SAP mappings.</p>}
+      <p className="set-note">Sales areas are listed separately. Each SAP manager number is shown once; repeated areas do not create additional copies. If the manager already receives the customer message at the same number, no extra copy is sent.</p>
       {loading || !(overview || overviewError) ? <div className="table-skeleton"><span /><span /><span /></div> : !directory ? <div className="empty-table"><strong>Unable to load SAP masters</strong><p>Refresh to try reading SAP again.</p></div> : !rows.length ? <div className="empty-table"><Users size={26} aria-hidden="true" /><strong>No matching customers</strong><p>Try clearing the search or filters.</p></div> : <>
         <div className="table-scroll"><table className="customers-table sap-masters-table"><thead><tr><th>Customer</th><th>SAP code</th><th>Customer number</th><th>Other numbers</th><th>Sales area<br /><small>Org / Channel / Division</small></th><th>Sales group</th><th>Sales office</th><th>SAP marketing manager</th><th>Messaging</th><th>Manager copy goes to</th></tr></thead><tbody>
           {pagination.pageRows.map((row) => <tr key={row.customerNumber}>
@@ -95,7 +96,7 @@ export function SapMasters() {
             <td className="mono">{row.salesAssignments.length ? row.salesAssignments.map((area, index) => <div className="sap-master-assignment" key={index}>{area.salesOrganization || '—'} / {area.distributionChannel || '—'} / {area.division || '—'}</div>) : 'Not maintained'}</td>
             <td className="mono">{row.salesAssignments.map((area, index) => <div className="sap-master-assignment" key={index}>{area.salesGroup || '—'}</div>)}</td>
             <td className="mono">{row.salesAssignments.map((area, index) => <div className="sap-master-assignment" key={index}>{area.salesOffice || '—'}</div>)}</td>
-            <td>{row.salesAssignments.length ? row.salesAssignments.map((area, index) => <div className="sap-master-assignment" key={index}>{area.marketingManagerPhone ? <span className="mono">+{area.marketingManagerPhone}</span> : '—'}</div>) : '—'}</td>
+            <td>{row.salesAssignments.length ? [...new Set(row.salesAssignments.map((area) => area.marketingManagerPhone))].map((phone, index) => <div className="sap-master-assignment" key={index}>{phone ? <span className="mono">+{phone}</span> : '—'}</div>) : '—'}</td>
             <MessagingCells customer={messagingByCustomer.get(row.customerNumber)} loaded={Boolean(overview)} onOpen={(kind) => setModal({ kind, customerNumber: row.customerNumber })} />
           </tr>)}
         </tbody></table></div>
@@ -135,10 +136,15 @@ function MessagingCells({ customer, loaded, onOpen }: {
       </div>}
     </td>
     <td>
-      {setting?.managerPhone
+      {customer.managerCopy?.source === 'sap' ? <>
+        <strong>From SAP</strong>
+        {customer.managerCopy.recipient ? <small className="mono"> +{customer.managerCopy.recipient}</small> : <small> — · No copy</small>}
+        {customer.managerCopy.recipient === customer.livePhone && <small> Already receiving the customer message · no extra copy</small>}
+        {customer.managerCopy.reason && <small className="health health--warn"> {customer.managerCopy.reason}</small>}
+      </> : setting?.managerPhone
         ? <><strong>{setting.managerName ?? 'Manager'}</strong><small className="mono"> +{setting.managerPhone}</small>{!customer.managerPhoneApproved && <small className="health health--bad"> Not on server list</small>}</>
         : <span className="health health--none">No manager · no copy</span>}
-      {customer.status !== 'locked' && <div className="sap-master-assignment"><button type="button" className="button button--secondary button--compact" onClick={() => onOpen('manager')}>{setting?.managerPhone ? 'Change' : 'Assign'}</button></div>}
+      {customer.managerCopy?.source !== 'sap' && customer.status !== 'locked' && <div className="sap-master-assignment"><button type="button" className="button button--secondary button--compact" onClick={() => onOpen('manager')}>{setting?.managerPhone ? 'Change' : 'Assign'}</button></div>}
     </td>
   </>;
 }

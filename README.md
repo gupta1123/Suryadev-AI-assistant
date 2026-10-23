@@ -112,9 +112,18 @@ only for this read-only lookup; keep the existing `SAP_API_USERNAME` and
 `SAP_API_PASSWORD` for customers and billing documents. With both optional values
 unset, the directory uses the existing SAP login as before.
 
-These directory numbers do not enable messaging, approve recipients, or change
-the configured manager-copy destination. Missing or inaccessible numbers remain
-a dash. Keep passwords out of Git and the frontend.
+By default these directory numbers only display information. To route copies to
+SAP managers, set `MSG91_MARKETING_COPY_SOURCE=sap`. This ignores old manual
+manager assignments and reads the customer's mapping again at queue and dispatch
+time. The customer must still be enabled, and in test mode the SAP manager must
+also be in `MARKETING_MANAGER_ALLOWED_RECIPIENTS`. Missing, conflicting, invalid
+or placeholder mappings send no copy, with no manual fallback. Different managers
+across sales areas require review rather than choosing one or broadcasting.
+Repeated assignments to one number produce only one copy; if it is already the
+customer recipient, no additional copy is sent. Old queued copies whose recipient
+no longer matches are refused. Customer approvals, test boundaries, customer
+recipients, Need Help routing and accepted history are not changed. Keep
+passwords out of Git and the frontend.
 
 ## Live SAP polling
 

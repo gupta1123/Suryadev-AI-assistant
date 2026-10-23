@@ -38,6 +38,7 @@ const envSchema = z.object({
   MSG91_INTEGRATED_NUMBER: z.string().optional(),
   MSG91_SEND_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   MSG91_MARKETING_COPY_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+  MSG91_MARKETING_COPY_SOURCE: z.enum(['manual', 'sap']).default('manual'),
   // Ceiling for per-client marketing manager numbers. Managers are assigned per
   // customer in Settings; in test mode a manager number must also be listed here.
   MARKETING_MANAGER_ALLOWED_RECIPIENTS: z.string().default(''),
