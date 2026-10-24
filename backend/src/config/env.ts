@@ -24,9 +24,10 @@ const envSchema = z.object({
   SAP_SALES_GROUP_API_PASSWORD: z.string().default(''),
   SAP_POLL_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   SAP_POLL_INTERVAL_MS: z.coerce.number().int().min(5000).max(300000).default(15000),
-  SAP_POLL_START_DATE: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default('2026-07-29'),
+  SAP_POLL_START_DATE: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default('2026-10-20'),
   SAP_POLL_START_AT: z.union([z.literal(''), z.string().datetime({ offset: true })]).default(''),
   SAP_ALLOWED_CUSTOMERS: z.string().default(''),
+  CUSTOMER_APPROVAL_MODE: z.enum(['server_list', 'dashboard']).default('server_list'),
   SAP_ALLOWED_BILLING_DOCUMENTS: z.string().default(''),
   SAP_TMT_MATERIAL_IDS: z.string().default(''),
   SAP_TMT_MATERIAL_PREFIXES: z.string().default('TMT,STEEL-TMT'),
@@ -92,6 +93,10 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+
+export function isDashboardCustomerApprovalEnabled(): boolean {
+  return env.CUSTOMER_APPROVAL_MODE === 'dashboard';
+}
 
 if (env.DELIVERY_MODE === 'production' && !env.ALLOW_PRODUCTION_DELIVERY) {
   console.error(
@@ -162,7 +167,7 @@ export const isInvoiceDeliveryRuntimeConfigured = Boolean(
     isMsg91Configured &&
     env.MSG91_SEND_ENABLED &&
     (env.DELIVERY_MODE !== 'test' ||
-      (whatsappTestRecipients.size > 0 &&
+      ((whatsappTestRecipients.size > 0 || isDashboardCustomerApprovalEnabled()) &&
         (env.INVOICE_SOURCE !== 'sap' || isSapTestBoundaryConfigured()))),
 );
 
@@ -213,7 +218,7 @@ export const isSapPollingConfigured = Boolean(
     env.SAP_POLL_ENABLED &&
     isInvoiceDeliveryRuntimeConfigured &&
     isSapConfigured &&
-    sapAllowedCustomers.size > 0 &&
+    (sapAllowedCustomers.size > 0 || isDashboardCustomerApprovalEnabled()) &&
     (env.DELIVERY_MODE !== 'test' || isSapTestBoundaryConfigured()),
 );
 

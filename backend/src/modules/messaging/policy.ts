@@ -1,8 +1,12 @@
 // Pure messaging-approval rules. Nothing here reads the database or the
 // environment, so every decision can be tested exhaustively.
 //
-// Principle: a message needs BOTH the server-environment ceiling AND an explicit
-// approval saved from Settings. Settings can only narrow what the ceiling allows.
+// A message needs an explicit customer approval saved from Settings. Legacy
+// deployments also require the server customer/phone ceiling. Dashboard mode
+// permits only that exact SAP-approved customer phone outside the legacy list;
+// internal test, manager and reminder ceilings are never broadened by it.
+
+import { documentDateBlocker } from './document-date-policy.js';
 
 export type CustomerMessagingSetting = {
   sapCustomerNumber: string;
@@ -26,6 +30,7 @@ export type InternalRecipient = {
 };
 
 export type Ceilings = {
+  dashboardApprovals?: boolean;
   mode: 'test' | 'production';
   customers: ReadonlySet<string>;
   phones: ReadonlySet<string>;
@@ -51,7 +56,7 @@ export function evaluateCustomerMessaging(
   customerNumber: string,
   setting: CustomerMessagingSetting | null,
 ): Decision {
-  if (ceilings.mode === 'test' && !ceilings.customers.has(customerNumber)) {
+  if (!ceilings.dashboardApprovals && ceilings.mode === 'test' && !ceilings.customers.has(customerNumber)) {
     return deny('customer is outside the server-approved customers');
   }
   if (!setting?.enabled || setting.sapCustomerNumber !== customerNumber) {
@@ -70,6 +75,7 @@ export function evaluateDocumentSend(
     customerNumber: string;
     recipient: string;
     documentCreatedAt: string | null;
+    documentDate: string | null;
     setting: CustomerMessagingSetting | null;
     internal: InternalRecipient | null;
   },
@@ -77,11 +83,15 @@ export function evaluateDocumentSend(
   const test = ceilings.mode === 'test';
   const recipient = digits(input.recipient);
   if (!recipient) return deny('recipient is missing');
-  if (test && !ceilings.phones.has(recipient)) {
+  const exactDashboardRecipient = ceilings.dashboardApprovals && input.source === 'sap' &&
+    recipient === digits(input.setting?.approvedPhone);
+  if (test && !ceilings.phones.has(recipient) && !exactDashboardRecipient) {
     return deny('recipient is outside the server-approved test numbers');
   }
   const customerApproval = evaluateCustomerMessaging(ceilings, input.customerNumber, input.setting);
   if (!customerApproval.allowed) return customerApproval;
+  const dateRefusal = documentDateBlocker(input, input.setting?.enabledAt);
+  if (dateRefusal) return deny(dateRefusal);
 
   const internalApproved = Boolean(input.internal?.allowSimulator) &&
     digits(input.internal?.phone) === recipient;

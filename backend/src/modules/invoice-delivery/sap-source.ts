@@ -5,6 +5,8 @@ import {
   isSapTestBoundaryConfigured,
   isSapTestDocumentAllowed,
 } from '../../config/env.js';
+import { approvedSapCustomerNumbers } from '../messaging/customer-scope.js';
+import { DOCUMENT_SEND_CUTOFF, documentDateBlocker } from '../messaging/document-date-policy.js';
 import type { InvoiceCandidate } from './domain.js';
 import type { InvoiceSource, InvoiceSourceSummary } from './invoice-source.js';
 import {
@@ -22,14 +24,13 @@ export class SapInvoiceSource implements InvoiceSource {
   constructor(private readonly client = new SapODataClient()) {}
 
   async list(): Promise<InvoiceSourceSummary[]> {
-    if (sapAllowedCustomers.size === 0) return [];
-    const customerFilter = [...sapAllowedCustomers]
-      .map((customer) => `SoldToParty eq '${escapeODataString(customer)}'`)
-      .join(' or ');
+    const customers = await approvedSapCustomerNumbers();
+    if (customers.size === 0) return [];
+    const customerNumbers = [...customers];
     const startDate = env.DELIVERY_MODE === 'test' && sapAllowedBillingDocuments.size === 0 && env.SAP_POLL_START_AT
       ? [env.SAP_POLL_START_DATE, new Date(env.SAP_POLL_START_AT).toISOString().slice(0, 10)].sort().at(-1)!
       : env.SAP_POLL_START_DATE;
-    const start = `${startDate}T00:00:00`;
+    const start = `${[startDate, DOCUMENT_SEND_CUTOFF].sort().at(-1)}T00:00:00`;
     const documentTypeFilter = SUPPORTED_BILLING_DOCUMENT_TYPES
       .map((type) => `BillingDocumentType eq '${type}'`)
       .join(' or ');
@@ -37,18 +38,27 @@ export class SapInvoiceSource implements InvoiceSource {
       .map((id) => `BillingDocument eq '${escapeODataString(id)}'`)
       .join(' or ');
     if (env.DELIVERY_MODE === 'test' && !isSapTestBoundaryConfigured()) return [];
-    const rows = await this.client.collection(
-      'API_BILLING_DOCUMENT_SRV',
-      'A_BillingDocument',
-      {
-        filter: `(${customerFilter}) and (${documentTypeFilter}) and CreationDate ge datetime'${start}'${billingDocumentFilter ? ` and (${billingDocumentFilter})` : ''}`,
-        orderBy: 'CreationDate asc,CreationTime asc,BillingDocument asc',
-        top: 500,
-      },
-    );
+    const rows: ODataRecord[] = [];
+    // Read subsequent pages rather than repeatedly examining only the oldest
+    // 500 documents. The safety cap fails closed instead of showing a partial run.
+    for (let offset = 0; offset < customerNumbers.length; offset += 50) {
+      const customerFilter = customerNumbers.slice(offset, offset + 50)
+        .map(customer => `SoldToParty eq '${escapeODataString(customer)}'`).join(' or ');
+      for (let skip = 0; ; skip += 500) {
+        if (skip >= 50_000 || rows.length >= 50_000) throw new Error('SAP billing poll exceeds its safety limit');
+        const page = await this.client.collection('API_BILLING_DOCUMENT_SRV', 'A_BillingDocument', {
+          filter: `(${customerFilter}) and (${documentTypeFilter}) and CreationDate ge datetime'${start}'${billingDocumentFilter ? ` and (${billingDocumentFilter})` : ''}`,
+          orderBy: 'CreationDate asc,CreationTime asc,BillingDocument asc', top: 500, skip,
+        });
+        rows.push(...page);
+        if (page.length < 500) break;
+      }
+    }
 
     return rows
-      .filter((row) => isEligibleHeader(row))
+      .filter((row) => isEligibleHeader(row, customers))
+      .sort((a, b) => `${sapDateOnly(a.CreationDate)}${text(a.CreationTime)}${text(a.BillingDocument)}`
+        .localeCompare(`${sapDateOnly(b.CreationDate)}${text(b.CreationTime)}${text(b.BillingDocument)}`))
       .map((row) => {
         const definition = getBillingDocumentDefinition(text(row.BillingDocumentType));
         return {
@@ -72,7 +82,7 @@ export class SapInvoiceSource implements InvoiceSource {
     );
     const header = headers[0];
     if (!header) throw new Error(`SAP billing document ${id} was not found`);
-    if (!isEligibleHeader(header)) {
+    if (!isEligibleHeader(header, await approvedSapCustomerNumbers())) {
       throw new Error(`SAP billing document ${id} is outside the configured customer/date boundary`);
     }
 
@@ -195,16 +205,17 @@ export class SapInvoiceSource implements InvoiceSource {
   }
 }
 
-function isEligibleHeader(row: ODataRecord): boolean {
+function isEligibleHeader(row: ODataRecord, customers = sapAllowedCustomers): boolean {
   const customer = text(row.SoldToParty);
   const creationDate = sapDateOnly(row.CreationDate);
   return Boolean(
     text(row.BillingDocument) &&
+      !documentDateBlocker({ documentDate: sapDateOnly(row.BillingDocumentDate), documentCreatedAt: combineSapDateAndTime(row.CreationDate, row.CreationTime) }) &&
       isSapTestDocumentAllowed(
         text(row.BillingDocument),
         combineSapDateAndTime(row.CreationDate, row.CreationTime),
       ) &&
-      sapAllowedCustomers.has(customer) &&
+      customers.has(customer) &&
       Boolean(getBillingDocumentDefinition(text(row.BillingDocumentType))) &&
       creationDate >= env.SAP_POLL_START_DATE,
   );

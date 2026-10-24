@@ -5,6 +5,7 @@ import {
   sapAllowedCustomers,
   isSapTestDocumentAllowed,
   whatsappTestRecipients,
+  isDashboardCustomerApprovalEnabled,
 } from '../../config/env.js';
 import {
   claimSapPollingCheckpoint,
@@ -16,6 +17,7 @@ import { processDeliveryQueue } from './worker.js';
 import { isWhatsappTemplateApproved } from './msg91-client.js';
 import { documentPollBlocker } from '../messaging/guard.js';
 import { CREATED_BEFORE_ENABLED } from '../messaging/policy.js';
+import { documentDateBlocker } from '../messaging/document-date-policy.js';
 import {
   getBillingDocumentDefinition,
   isTmtDocument,
@@ -113,6 +115,7 @@ export async function pollSapInvoices(): Promise<SapPollResult> {
           customerNumber: candidate.customer.customerNumber,
           livePhone: candidate.contact.normalizedValue,
           creationDateTime: candidate.creationDateTime ?? null,
+          documentDate: candidate.billingDocumentDate,
         });
         if (reason) {
           result.skipped += 1;
@@ -169,10 +172,12 @@ export function automaticDeliveryBlocker(
 ): string | null {
   const definition = getBillingDocumentDefinition(candidate.billingDocumentType);
   if (!definition) return 'billing document type is not supported';
+  const dateRefusal = documentDateBlocker({ documentDate: candidate.billingDocumentDate, documentCreatedAt: candidate.creationDateTime });
+  if (dateRefusal) return dateRefusal;
   if (!isSapTestDocumentAllowed(candidate.billingDocument, candidate.creationDateTime)) {
     return 'billing document is outside the test document boundary';
   }
-  if (!sapAllowedCustomers.has(candidate.customer.customerNumber)) {
+  if (!isDashboardCustomerApprovalEnabled() && !sapAllowedCustomers.has(candidate.customer.customerNumber)) {
     return 'customer is outside the SAP allowlist';
   }
   if ((candidate.creationDateTime ?? `${candidate.billingDocumentDate}T00:00:00.000Z`).slice(0, 10) < env.SAP_POLL_START_DATE) {
@@ -188,6 +193,7 @@ export function automaticDeliveryBlocker(
   }
   if (
     env.DELIVERY_MODE === 'test' &&
+    !isDashboardCustomerApprovalEnabled() &&
     !whatsappTestRecipients.has(candidate.contact.normalizedValue)
   ) {
     return 'customer WhatsApp number is outside the test allowlist';

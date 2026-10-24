@@ -7,6 +7,7 @@ import {
   isSapTestDocumentAllowed,
   sapAllowedCustomers,
   whatsappTestRecipients,
+  isDashboardCustomerApprovalEnabled,
 } from '../../config/env.js';
 import {
   buildMsg91InvoicePayload,
@@ -75,7 +76,7 @@ async function processClaimedJob(job: Awaited<ReturnType<typeof claimNextDeliver
   if (
     env.DELIVERY_MODE === 'test' &&
     env.INVOICE_SOURCE === 'sap' &&
-    (!sapAllowedCustomers.has(context.customer.sap_customer_number) ||
+    ((!isDashboardCustomerApprovalEnabled() && !sapAllowedCustomers.has(context.customer.sap_customer_number)) ||
       !isSapTestDocumentAllowed(
         context.invoice.sap_billing_document,
         context.invoice.creation_datetime,
@@ -86,6 +87,7 @@ async function processClaimedJob(job: Awaited<ReturnType<typeof claimNextDeliver
   const recipient = digitsOnly(String(context.metadata.actual_recipient ?? ''));
   if (
     env.DELIVERY_MODE === 'test' &&
+    !(isDashboardCustomerApprovalEnabled() && jobSource(context.metadata) === 'sap') &&
     (!recipient || !whatsappTestRecipients.has(recipient))
   ) {
     throw new Error('Delivery worker refused a recipient outside the test allowlist');
@@ -96,6 +98,7 @@ async function processClaimedJob(job: Awaited<ReturnType<typeof claimNextDeliver
     customerNumber: context.customer.sap_customer_number,
     recipient,
     documentCreatedAt: context.invoice.creation_datetime,
+    documentDate: context.invoice.billing_document_date,
   });
   await assertApproved();
 

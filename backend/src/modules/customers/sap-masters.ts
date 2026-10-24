@@ -21,6 +21,22 @@ export type SapMasterCustomer = {
 type Directory = { items: SapMasterCustomer[]; managerMappingAvailable: boolean };
 const CACHE_MS = 5 * 60_000;
 const MAX_ROWS = 10_000;
+
+/** Fresh, targeted check for already queued SAP messages; never use directory cache. */
+export async function readCurrentSapPrimaryPhone(customerNumber: string): Promise<string | null> {
+  if (!isSapConfigured) throw new Error('SAP verification is unavailable');
+  const client = new SapODataClient();
+  const [customers, addresses] = await Promise.all([
+    client.collection('API_BUSINESS_PARTNER', 'A_Customer', { filter: `Customer eq '${escapeODataString(customerNumber)}'`, select: ['Customer'], top: 1 }),
+    client.collection('API_BUSINESS_PARTNER', 'A_BusinessPartnerAddress', { filter: `BusinessPartner eq '${escapeODataString(customerNumber)}'`, select: ['AddressID'], top: MAX_ROWS }),
+  ]);
+  if (!customers.length || !addresses.length || addresses.length >= MAX_ROWS) return null;
+  const filter = addresses.map(row => `AddressID eq '${escapeODataString(text(row.AddressID))}'`).join(' or ');
+  const phones = await client.collection('API_BUSINESS_PARTNER', 'A_AddressPhoneNumber', { filter: `(${filter})`, top: MAX_ROWS });
+  if (phones.length >= MAX_ROWS) throw new Error('SAP phone verification returned a partial result');
+  const phone = choosePhone(phones);
+  return phone ? normalizeIndianPhone(text(phone.InternationalPhoneNumber) || text(phone.PhoneNumber)) || null : null;
+}
 let cache: (Directory & { checkedAt: string; loadedAt: number }) | undefined;
 let inFlight: Promise<NonNullable<typeof cache>> | undefined;
 

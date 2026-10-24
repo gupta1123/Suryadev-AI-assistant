@@ -21,6 +21,7 @@ import {
 import { formatPhone } from '../invoice-delivery/policy.js';
 import { auditUserId, getReminderSettings } from './settings.js';
 import { paymentDetailsForStorage, type PaymentDetails } from './payment-details.js';
+import { documentDateBlocker } from '../messaging/document-date-policy.js';
 
 const TEST_POLICY_NAME = 'Local controlled payment follow-up test';
 const TEST_STAGE_CODE = 'due_today';
@@ -1007,11 +1008,17 @@ export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleRe
   if (!paymentCase?.next_action_at) return { enqueued: false, reason: 'not_due' };
   const { data: invoice, error: invoiceError } = await client
     .from('invoices')
-    .select('id,sap_billing_document,sold_to_customer_id')
+    .select('id,sap_billing_document,sold_to_customer_id,billing_document_date,creation_datetime')
     .eq('id', paymentCase.invoice_id)
     .single();
   if (invoiceError || !invoice) {
     throw new Error(`Unable to load the due payment invoice: ${invoiceError?.message ?? 'Invoice not found'}`);
+  }
+  const dateRefusal = documentDateBlocker({ documentDate: invoice.billing_document_date, documentCreatedAt: invoice.creation_datetime });
+  if (dateRefusal) {
+    const { error } = await client.from('payment_follow_up_cases').update({ status: 'paused', next_action_at: null }).eq('id', paymentCase.id);
+    if (error) throw new Error(`Unable to pause an old-document reminder: ${error.message}`);
+    return { enqueued: false, reason: 'not_due' };
   }
 
   const { data: receivable, error: receivableError } = await client

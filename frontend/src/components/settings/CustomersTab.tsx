@@ -110,11 +110,13 @@ export function CustomersTab({
           <li>Turning a customer on approves their current SAP phone number. Only documents created after that are sent.</li>
           <li>If SAP later shows a different number, sending to that customer pauses until you approve the new one.</li>
           <li>Being in this list doesn’t mean the number is on WhatsApp.</li>
-          <li>Customers marked “Not available” aren’t allowed by the server’s settings — your technical admin controls that list.</li>
+          <li>New SAP customers start Off. In dashboard approval mode, review their details and turn on only the customers you authorise.</li>
+          <li>No WhatsApp messages are sent about documents dated before 20 October 2026, including reminders, manager copies and document-linked help alerts.</li>
         </ul>
       </details>
 
       {messagingError && <div className="alert alert--error" role="alert">Customer controls couldn’t be loaded: {messagingError}</div>}
+      {messaging?.approvalBlocker && <div className="alert alert--error" role="alert">New-customer approval is unavailable: {messaging.approvalBlocker}</div>}
       {directoryError && (
         <div className="alert alert--error" role="alert">
           {directoryError}{directory ? ' The list below is from the last successful read.' : ' Customers who are already set up are still shown.'}
@@ -153,7 +155,7 @@ export function CustomersTab({
         </FilterBar>
 
         {chip === 'locked' && (
-          <p className="st-callout"><Info size={15} aria-hidden="true" /> These customers exist in SAP but aren’t on the server’s approved list, so they can’t be turned on here.</p>
+          <p className="st-callout"><Info size={15} aria-hidden="true" /> These customers cannot currently be enabled. Check the onboarding notice above or ask your administrator to enable dashboard approval.</p>
         )}
 
         {showSkeleton ? <Skeleton rows={5} /> : !visible.length ? (

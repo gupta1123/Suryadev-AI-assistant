@@ -388,6 +388,7 @@ async function buildApprovedInvoicePreview(
       customerNumber: candidate.customer.customerNumber,
       recipient: preview.actualRecipient,
       documentCreatedAt: candidate.creationDateTime ?? null,
+      documentDate: candidate.billingDocumentDate,
     });
   } catch (error) {
     settingsRefusal = error instanceof Error ? error.message : 'Approval could not be checked';

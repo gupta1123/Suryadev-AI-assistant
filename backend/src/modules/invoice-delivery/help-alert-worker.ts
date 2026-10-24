@@ -9,12 +9,13 @@ import {
   markHelpRequestAlertFailed,
   markHelpRequestAlertSent,
   releaseStaleHelpRequestAlerts,
+  assertHelpAlertDocumentAllowed,
 } from './help-alerts.js';
 import {
   isWhatsappTemplateApproved,
   sendHelpRequestAlertTemplate,
 } from './msg91-client.js';
-import { isHelpAlertRecipientPermitted } from '../messaging/guard.js';
+import { isHelpAlertRecipientPermitted, MessagingRefusal } from '../messaging/guard.js';
 
 let timer: NodeJS.Timeout | undefined;
 let running = false;
@@ -47,6 +48,7 @@ export async function processHelpRequestAlertQueue(): Promise<void> {
       if (!notification) break;
 
       try {
+        await assertHelpAlertDocumentAllowed(notification.reviewTaskId);
         if (!isHelpAlertRecipientPermitted(notification.recipient)) {
           await markHelpRequestAlertFailed(
             notification,
@@ -73,7 +75,7 @@ export async function processHelpRequestAlertQueue(): Promise<void> {
           templateName: notification.templateName,
           templateLanguage: notification.templateLanguage,
           ...notification.details,
-        });
+        }, () => assertHelpAlertDocumentAllowed(notification.reviewTaskId));
         if (result.ok) {
           await markHelpRequestAlertSent(notification.id, {
             ...(result.providerRequestId ? { providerRequestId: result.providerRequestId } : {}),
@@ -89,7 +91,7 @@ export async function processHelpRequestAlertQueue(): Promise<void> {
         await markHelpRequestAlertFailed(notification, message, terminal);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown help request alert error';
-        await markHelpRequestAlertFailed(notification, message);
+        await markHelpRequestAlertFailed(notification, message, error instanceof MessagingRefusal);
       }
     }
   } catch (error) {

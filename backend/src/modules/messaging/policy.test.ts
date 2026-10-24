@@ -20,7 +20,7 @@ const TEAM = '917019339764';
 const MANAGER = '917019339764';
 const ENABLED_AT = '2026-10-20T08:00:00.000Z';
 const AFTER = '2026-10-20T09:00:00.000Z';
-const BEFORE = '2026-10-19T09:00:00.000Z';
+const BEFORE = '2026-10-20T07:00:00.000Z';
 
 const ceilings = (overrides: Partial<Ceilings> = {}): Ceilings => ({
   mode: 'test',
@@ -63,12 +63,33 @@ const send = (
     customerNumber: CUSTOMER,
     recipient: CLIENT,
     documentCreatedAt: AFTER,
+    documentDate: '2026-10-20',
     setting: setting(),
     internal: null,
     ...input,
   });
 
 describe('document send approval', () => {
+  it('permits only the exact saved SAP phone in dashboard mode, not arbitrary recipients', () => {
+    const dashboard = ceilings({ dashboardApprovals: true, customers: new Set(), phones: new Set() });
+    assert.equal(send({}, dashboard).allowed, true);
+    assert.equal(send({ recipient: TEAM }, dashboard).allowed, false);
+    assert.equal(send({ setting: setting({ enabled: false }) }, dashboard).allowed, false);
+    assert.equal(send({ setting: null }, dashboard).allowed, false);
+    assert.equal(send({ source: 'fixture' }, dashboard).allowed, false);
+    assert.equal(send({ documentDate: '2026-10-19' }, dashboard).allowed, false);
+    assert.equal(send({ documentCreatedAt: BEFORE }, dashboard).allowed, false);
+  });
+
+  it('does not let a different customer inherit approval for a shared phone', () => {
+    assert.equal(send({ customerNumber: '510191' }, ceilings({ dashboardApprovals: true })).allowed, false);
+  });
+
+  it('enforces the cutoff even for fixture/internal routes and production', () => {
+    assert.equal(send({ source: 'fixture', recipient: TEAM, internal: internal(), documentDate: '2026-10-19' }).allowed, false);
+    assert.equal(send({ recipient: TEAM, internal: internal(), documentDate: '2026-10-19' }).allowed, false);
+    assert.equal(send({ documentDate: '2026-10-19' }, ceilings({ mode: 'production' })).allowed, false);
+  });
   it('allows an enabled customer at its approved phone for a document created after enabling', () => {
     assert.deepEqual(send(), { allowed: true, route: 'customer' });
   });

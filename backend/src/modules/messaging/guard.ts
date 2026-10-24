@@ -5,6 +5,7 @@ import {
   paymentTestRecipients,
   sapAllowedCustomers,
   whatsappTestRecipients,
+  isDashboardCustomerApprovalEnabled,
 } from '../../config/env.js';
 import {
   type Ceilings,
@@ -15,17 +16,24 @@ import {
   isHelpAlertRecipientPermitted as helpAlertPermitted,
 } from './policy.js';
 import { getCustomerSetting, getInternalRecipient } from './repository.js';
-import { readCurrentSapManagerAssignments } from '../customers/sap-masters.js';
+import { documentDateBlocker, type DocumentSendDates } from './document-date-policy.js';
+import { readCurrentSapManagerAssignments, readCurrentSapPrimaryPhone } from '../customers/sap-masters.js';
 import { evaluateSapManagerCopy, type ManagerCopyDecision } from './sap-manager-policy.js';
 
 export function currentCeilings(): Ceilings {
   return {
+    dashboardApprovals: isDashboardCustomerApprovalEnabled(),
     mode: env.DELIVERY_MODE,
     customers: sapAllowedCustomers,
     phones: whatsappTestRecipients,
     paymentPhones: paymentTestRecipients,
     managerPhones: marketingManagerAllowedRecipients,
   };
+}
+
+export function assertDocumentDateAllowed(dates: DocumentSendDates, enabledAt?: string | null): void {
+  const refusal = documentDateBlocker(dates, enabledAt);
+  if (refusal) throw new MessagingRefusal(refusal);
 }
 
 export class MessagingRefusal extends Error {
@@ -46,12 +54,19 @@ export async function assertDocumentSendAllowed(input: {
   customerNumber: string;
   recipient: string;
   documentCreatedAt: string | null;
+  documentDate: string | null;
 }): Promise<'customer' | 'internal'> {
   const recipient = digitsOnly(input.recipient);
+  const livePhone = isDashboardCustomerApprovalEnabled() && input.source === 'sap'
+    ? await readCurrentSapPrimaryPhone(input.customerNumber) : undefined;
   const [setting, internal] = await Promise.all([
     getCustomerSetting(input.customerNumber),
     getInternalRecipient(recipient),
   ]);
+  if (livePhone !== undefined) {
+    const live = evaluateLivePhone(setting, livePhone);
+    if (!live.allowed) throw new MessagingRefusal(live.reason);
+  }
   const decision = evaluateDocumentSend(currentCeilings(), { ...input, recipient, setting, internal });
   if (!decision.allowed) throw new MessagingRefusal(decision.reason);
   return decision.route;
@@ -62,6 +77,7 @@ export async function documentPollBlocker(candidate: {
   customerNumber: string;
   livePhone: string;
   creationDateTime: string | null;
+  documentDate: string | null;
 }): Promise<string | null> {
   try {
     const setting = await getCustomerSetting(candidate.customerNumber);
@@ -72,6 +88,7 @@ export async function documentPollBlocker(candidate: {
       customerNumber: candidate.customerNumber,
       recipient: candidate.livePhone,
       documentCreatedAt: candidate.creationDateTime,
+      documentDate: candidate.documentDate,
       setting,
       internal: null,
     });
@@ -112,17 +129,31 @@ async function currentManagerCopyDecision(customerNumber: string, queuedRecipien
 export async function assertManagerCopyStillAllowed(
   customerNumber: string,
   queuedRecipient: string,
+  dates: DocumentSendDates,
 ): Promise<void> {
+  const livePhone = isDashboardCustomerApprovalEnabled() ? await readCurrentSapPrimaryPhone(customerNumber) : undefined;
   const decision = await currentManagerCopyDecision(customerNumber, queuedRecipient);
   if (!decision.allowed) throw new MessagingRefusal(decision.reason);
+  const setting = await getCustomerSetting(customerNumber);
+  if (!setting?.enabled) throw new MessagingRefusal('customer is not enabled in Settings');
+  if (livePhone !== undefined) {
+    const live = evaluateLivePhone(setting, livePhone);
+    if (!live.allowed) throw new MessagingRefusal(live.reason);
+  }
+  assertDocumentDateAllowed(dates, setting.enabledAt);
 }
 
-export async function assertPaymentRecipientApproved(customerNumber: string, recipient: string): Promise<void> {
+export async function assertPaymentRecipientApproved(customerNumber: string, recipient: string, dates: DocumentSendDates): Promise<void> {
   const phone = digitsOnly(recipient);
+  const livePhone = isDashboardCustomerApprovalEnabled() ? await readCurrentSapPrimaryPhone(customerNumber) : undefined;
   const [setting, internal] = await Promise.all([
     getCustomerSetting(customerNumber),
     getInternalRecipient(phone),
   ]);
+  if (livePhone !== undefined) {
+    const live = evaluateLivePhone(setting, livePhone);
+    if (!live.allowed) throw new MessagingRefusal(live.reason);
+  }
   const decision = evaluatePaymentRecipient(
     currentCeilings(),
     customerNumber,
@@ -131,6 +162,7 @@ export async function assertPaymentRecipientApproved(customerNumber: string, rec
     internal,
   );
   if (!decision.allowed) throw new MessagingRefusal(decision.reason);
+  assertDocumentDateAllowed(dates, setting?.enabledAt);
 }
 
 export function isHelpAlertRecipientPermitted(recipient: string): boolean {

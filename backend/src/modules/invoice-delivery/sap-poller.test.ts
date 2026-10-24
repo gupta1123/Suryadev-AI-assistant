@@ -12,7 +12,8 @@ import { automaticDeliveryBlocker } from './sap-poller.js';
 describe('automatic SAP delivery boundary', () => {
   it('blocks a cancelled F2 original but permits the corresponding S1 document', async () => {
     const candidate = await new FixtureInvoiceSource().get('sap-invoice-0090000001');
-    candidate.creationDateTime = `${env.SAP_POLL_START_DATE}T12:00:00.000Z`;
+    candidate.creationDateTime = '2026-10-20T12:00:00.000Z';
+    candidate.billingDocumentDate = '2026-10-20';
     candidate.isCancelled = true;
 
     const customer = candidate.customer.customerNumber;
@@ -46,6 +47,7 @@ describe('automatic SAP delivery boundary', () => {
 
   it('accepts only newly created documents in the future-document UAT mode', async () => {
     const candidate = await new FixtureInvoiceSource().get('sap-invoice-0090000001');
+    candidate.billingDocumentDate = '2026-10-20';
     const originalDocuments = [...sapAllowedBillingDocuments];
     const originalStartAt = env.SAP_POLL_START_AT;
     const customer = candidate.customer.customerNumber;
@@ -53,13 +55,13 @@ describe('automatic SAP delivery boundary', () => {
     const customerWasAllowed = sapAllowedCustomers.has(customer);
     const recipientWasAllowed = whatsappTestRecipients.has(recipient);
     sapAllowedBillingDocuments.clear();
-    env.SAP_POLL_START_AT = `${env.SAP_POLL_START_DATE}T12:00:00.000Z`;
+    env.SAP_POLL_START_AT = '2026-10-20T12:00:00.000Z';
     sapAllowedCustomers.add(customer);
     whatsappTestRecipients.add(recipient);
     try {
-      candidate.creationDateTime = `${env.SAP_POLL_START_DATE}T11:59:59.000Z`;
+      candidate.creationDateTime = '2026-10-20T11:59:59.000Z';
       assert.match(automaticDeliveryBlocker(candidate) ?? '', /test document boundary/);
-      candidate.creationDateTime = `${env.SAP_POLL_START_DATE}T12:00:01.000Z`;
+      candidate.creationDateTime = '2026-10-20T12:00:01.000Z';
       assert.equal(automaticDeliveryBlocker(candidate), null);
     } finally {
       env.SAP_POLL_START_AT = originalStartAt;

@@ -7,6 +7,7 @@ import {
   assertManagerCopyStillAllowed,
   MessagingRefusal,
   resolveManagerCopyRecipient,
+  assertDocumentDateAllowed,
 } from '../messaging/guard.js';
 
 type Components = Record<string, { type: string; value: string; filename?: string }>;
@@ -43,6 +44,8 @@ export async function enqueueMarketingCopy(
   customerNumber: string,
 ): Promise<void> {
   if (!env.MSG91_MARKETING_COPY_ENABLED) return;
+  const context = await getDeliveryJobContextById(jobId);
+  assertDocumentDateAllowed({ documentDate: context.invoice.billing_document_date, documentCreatedAt: context.invoice.creation_datetime });
   // Use the configured source (live SAP or Settings), with no fallback manager.
   // The resolver returns one unique recipient even if several sales areas agree.
   const { recipient } = await resolveManagerCopyRecipient(customerNumber);
@@ -117,7 +120,10 @@ export async function processMarketingCopyQueue(): Promise<void> {
           async () => {
             // After ALL preparation, check the live manager and fresh customer
             // switch. Do not repeat the slow SAP lookup before preparing the PDF.
-            await assertManagerCopyStillAllowed(sourceContext.customer.sap_customer_number, String(row.recipient));
+            await assertManagerCopyStillAllowed(sourceContext.customer.sap_customer_number, String(row.recipient), {
+              documentDate: sourceContext.invoice.billing_document_date,
+              documentCreatedAt: sourceContext.invoice.creation_datetime,
+            });
             dispatched = true;
           },
         );

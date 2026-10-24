@@ -636,6 +636,10 @@ export type InternalRecipientRow = {
 };
 
 export type MessagingOverview = {
+  approvalMode?: 'server_list' | 'dashboard';
+  dashboardApprovalReady?: boolean;
+  approvalBlocker?: string | null;
+  documentCutoff?: string;
   deliveryMode: 'test' | 'production';
   sapHost: string;
   sapHostApproved: boolean;
@@ -648,6 +652,12 @@ export type MessagingOverview = {
 export type EligibilityResult = {
   customerNumber: string;
   checks: Array<{ label: string; passed: boolean; detail: string | null }>;
+};
+
+export type CustomerApprovalPreview = {
+  customerNumber: string; name: string; phone: string | null; canEnable: boolean;
+  documentCutoff: string; managerRecipient: string | null; managerReason: string | null; blocker: string | null;
+  sharedPhoneCustomers: Array<{ customerNumber: string; name: string }>;
 };
 
 export type SapMasterDirectoryItem = {

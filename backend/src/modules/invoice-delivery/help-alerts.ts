@@ -4,6 +4,8 @@ import {
 import { getSupabaseServerClient } from '../../lib/supabase.js';
 import { formatInvoiceAmount, formatInvoiceDate } from './policy.js';
 import { getHelpRequestAlertSettings } from './help-settings.js';
+import { documentDateBlocker } from '../messaging/document-date-policy.js';
+import { assertDocumentDateAllowed } from '../messaging/guard.js';
 
 export type HelpRequestAlertDetails = {
   customerName: string;
@@ -47,7 +49,7 @@ export async function enqueueHelpRequestAlert(input: {
       .single(),
     client
       .from('invoices')
-      .select('sap_billing_document,billing_document_date,transaction_currency,total_gross_amount')
+      .select('sap_billing_document,billing_document_date,creation_datetime,transaction_currency,total_gross_amount')
       .eq('id', input.invoiceId)
       .single(),
   ]);
@@ -60,6 +62,9 @@ export async function enqueueHelpRequestAlert(input: {
 
   const customer = customerResult.data;
   const invoice = invoiceResult.data;
+  // Keep the inbound help task visible, but never notify WhatsApp about an old
+  // document. Existing queued alerts are checked through their stored task too.
+  if (documentDateBlocker({ documentDate: invoice.billing_document_date, documentCreatedAt: invoice.creation_datetime })) return;
   const amount = invoice.total_gross_amount == null
     ? 'Not available'
     : `${String(invoice.transaction_currency || 'INR')} ${formatInvoiceAmount(Number(invoice.total_gross_amount))}`;
@@ -92,6 +97,15 @@ export async function enqueueHelpRequestAlert(input: {
       },
     );
   if (error) throw new Error(`Unable to queue the help request alert: ${error.message}`);
+}
+
+export async function assertHelpAlertDocumentAllowed(reviewTaskId: number): Promise<void> {
+  const client = getSupabaseServerClient();
+  const { data: task, error: taskError } = await client.from('review_tasks').select('invoice_id').eq('id', reviewTaskId).single();
+  if (taskError || !task?.invoice_id) throw new Error('Unable to verify help alert invoice');
+  const { data: invoice, error } = await client.from('invoices').select('billing_document_date,creation_datetime').eq('id', task.invoice_id).single();
+  if (error || !invoice) throw new Error('Unable to verify help alert document date');
+  assertDocumentDateAllowed({ documentDate: invoice.billing_document_date, documentCreatedAt: invoice.creation_datetime });
 }
 
 export async function claimNextHelpRequestAlert(

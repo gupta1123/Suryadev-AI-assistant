@@ -11,6 +11,34 @@ import {
 } from './sap-source.js';
 
 describe('SAP value normalization', () => {
+  it('reads beyond the first 500 documents without bypassing the date floor', async () => {
+    const originalDocuments = [...sapAllowedBillingDocuments];
+    const originalStartAt = env.SAP_POLL_START_AT;
+    const customerWasAllowed = sapAllowedCustomers.has('550071');
+    const skips: number[] = [];
+    const createdAt = `/Date(${Date.parse('2026-10-21T00:00:00Z')})/`;
+    const rows = Array.from({ length: 501 }, (_, index) => ({
+      BillingDocument: `PAGE${String(index).padStart(5, '0')}`, BillingDocumentType: 'G2',
+      BillingDocumentDate: createdAt, CreationDate: createdAt, CreationTime: 'PT12H00M00S', SoldToParty: '550071',
+    }));
+    const fakeClient = { async collection(_service: string, _entity: string, options: { skip?: number; top?: number } = {}) {
+      const skip = options.skip ?? 0; skips.push(skip);
+      return rows.slice(skip, skip + (options.top ?? 500));
+    } } as unknown as SapODataClient;
+    sapAllowedBillingDocuments.clear();
+    env.SAP_POLL_START_AT = '2026-10-20T00:00:00Z';
+    sapAllowedCustomers.add('550071');
+    try {
+      const result = await new SapInvoiceSource(fakeClient).list();
+      assert.deepEqual(skips, [0, 500]);
+      assert.equal(result.length, 501);
+      assert.equal(result.at(-1)?.billingDocument, 'PAGE00500');
+    } finally {
+      env.SAP_POLL_START_AT = originalStartAt;
+      for (const id of originalDocuments) sapAllowedBillingDocuments.add(id);
+      if (!customerWasAllowed) sapAllowedCustomers.delete('550071');
+    }
+  });
   it('lists only the five supported billing document types in the SAP query', async () => {
     let filter = '';
     const fakeClient = {
@@ -42,7 +70,7 @@ describe('SAP value normalization', () => {
     const originalDocuments = [...sapAllowedBillingDocuments];
     const originalStartAt = env.SAP_POLL_START_AT;
     const customerWasAllowed = sapAllowedCustomers.has('550071');
-    const createdAt = `/Date(${Date.parse(`${env.SAP_POLL_START_DATE}T00:00:00.000Z`)})/`;
+    const createdAt = `/Date(${Date.parse('2026-10-20T00:00:00.000Z')})/`;
     let filter = '';
     const fakeClient = {
       async collection(
@@ -54,6 +82,7 @@ describe('SAP value normalization', () => {
         return ['BEFORE', 'AFTER'].map((id) => ({
           BillingDocument: id,
           BillingDocumentType: 'G2',
+          BillingDocumentDate: createdAt,
           CreationDate: createdAt,
           CreationTime: id === 'BEFORE' ? 'PT11H59M59S' : 'PT12H00M01S',
           SoldToParty: '550071',
@@ -61,7 +90,7 @@ describe('SAP value normalization', () => {
       },
     } as unknown as SapODataClient;
     sapAllowedBillingDocuments.clear();
-    env.SAP_POLL_START_AT = `${env.SAP_POLL_START_DATE}T12:00:00.000Z`;
+    env.SAP_POLL_START_AT = '2026-10-20T12:00:00.000Z';
     sapAllowedCustomers.add('550071');
     try {
       const rows = await new SapInvoiceSource(fakeClient).list();
@@ -91,7 +120,7 @@ describe('SAP value normalization', () => {
 
   it('reads customer phones using the AddressID supported by SAP', async () => {
     const calls: Array<{ entitySet: string; filter?: string }> = [];
-    const createdAt = `/Date(${Date.parse(`${env.SAP_POLL_START_DATE}T00:00:00.000Z`)})/`;
+    const createdAt = `/Date(${Date.parse('2026-10-20T00:00:00.000Z')})/`;
     const fakeClient = {
       async collection(
         _service: string,

@@ -233,12 +233,43 @@ Who may receive WhatsApp messages is managed in **Settings → SAP masters** and
 2. an explicit approval saved in the database (`customer_messaging_settings`,
    `internal_test_recipients`).
 
-Settings can only narrow the environment ceiling, never widen it, and empty tables
-mean nothing is sent. Enabling a customer approves its current SAP phone and only
+In the default `CUSTOMER_APPROVAL_MODE=server_list`, Settings only narrows the
+environment ceiling. With `CUSTOMER_APPROVAL_MODE=dashboard`, authenticated admins
+can approve a live SAP customer and its exact phone without editing per-customer
+environment lists. New SAP customers remain Off; an empty approval table sends
+nothing in dashboard mode. Enabling a customer approves its current SAP phone and only
 documents created afterwards are sent. If SAP later reports a different number,
 sending pauses until the new number is approved. Each customer's marketing manager
 copy goes to the manager assigned to that customer (no fallback manager).
 Approvals are re-read from the database immediately before every send.
+
+Dashboard onboarding requires an explicit recipient confirmation and a second
+acknowledgement if another SAP customer shares the number. Approval never applies
+to every customer at that phone. The enable endpoint re-reads SAP; queued SAP
+messages verify the current phone at dispatch. Test/simulator recipients, payment
+test recipients and manager recipient ceilings remain separate restrictions.
+
+All document-linked WhatsApp sends have a non-overridable date floor of
+**20 October 2026 inclusive** (India time for creation timestamps). The stored SAP
+billing/document date must meet the floor even when a record is imported later.
+Missing/invalid dates fail closed. The rule covers invoice/memo workers, manual
+retries, fixtures, reminders, manager copies and document-linked help alerts.
+Help tasks and historical documents remain visible; no historical records are
+deleted. Documents created before a customer's latest activation remain blocked.
+
+Roll out the cutoff before activating dashboard onboarding. Pause outbound
+workers while deploying; set `SAP_POLL_START_DATE=2026-10-20` and
+`SAP_POLL_START_AT=2026-10-19T18:30:00.000Z`; enable dashboard mode only with the
+existing approvals preserved. Run the read-only queue audit below after building:
+
+```bash
+# Requires backend-only SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the environment.
+node backend/scripts/check-document-cutoff.mjs
+```
+
+The audit never claims, sends, retries, updates or deletes messages. Existing old
+queued jobs fail closed with a recorded reason when processed. Sending flags and
+customer switches must not be enabled as part of a verification test.
 
 `SAP_EXPECTED_HOST` pins the SAP tenant: in test mode SAP reads and sends are refused
 if `SAP_API_BASE_URL` has a different hostname. `DELIVERY_MODE=production` is refused

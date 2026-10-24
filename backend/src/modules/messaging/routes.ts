@@ -8,6 +8,7 @@ import {
   whatsappTestRecipients,
   paymentTestRecipients,
   marketingManagerAllowedRecipients,
+  isDashboardCustomerApprovalEnabled,
 } from '../../config/env.js';
 import { asyncHandler, HttpError } from '../../lib/http.js';
 import { type AuthenticatedRequest, requireAdmin } from '../../middleware/auth.js';
@@ -31,6 +32,7 @@ import {
   saveInternalRecipient,
   writeMessagingAudit,
 } from './repository.js';
+import { DOCUMENT_SEND_CUTOFF } from './document-date-policy.js';
 
 const customerNumberSchema = z.string().regex(/^[A-Za-z0-9]{1,20}$/);
 const phoneParamSchema = z.string().regex(PHONE_PATTERN);
@@ -49,8 +51,9 @@ function actor(request: AuthenticatedRequest) {
 }
 
 function requireCeilingCustomer(customerNumber: string): void {
-  // In test mode only customers named in the server environment can be managed.
-  if (env.DELIVERY_MODE === 'test' && !sapAllowedCustomers.has(customerNumber)) {
+  // Legacy test deployments retain their server list; dashboard mode requires
+  // a fresh, exact SAP customer/phone approval below instead.
+  if (!isDashboardCustomerApprovalEnabled() && env.DELIVERY_MODE === 'test' && !sapAllowedCustomers.has(customerNumber)) {
     throw new HttpError(
       403,
       'This customer is not in the server-approved customer list, so it cannot be enabled here',
@@ -89,7 +92,8 @@ messagingRouter.get(
     }
     const live = new Map(directory.map((item) => [item.customerNumber, item]));
     const byCustomer = new Map(settings.map((item) => [item.sapCustomerNumber, item]));
-    const customerNumbers = [...new Set([...sapAllowedCustomers, ...byCustomer.keys()])].sort();
+    const dashboard = isDashboardCustomerApprovalEnabled();
+    const customerNumbers = [...new Set([...sapAllowedCustomers, ...byCustomer.keys(), ...(dashboard ? live.keys() : [])])].sort();
     const internalByPhone = new Map(internal.map((item) => [item.phone, item]));
     const ceilingPhones = [...whatsappTestRecipients];
 
@@ -99,10 +103,14 @@ messagingRouter.get(
         sapHost: sapHostname,
         sapHostApproved: isSapHostApproved,
         directoryError,
+        approvalMode: env.CUSTOMER_APPROVAL_MODE,
+        dashboardApprovalReady: dashboard,
+        approvalBlocker: null,
+        documentCutoff: DOCUMENT_SEND_CUTOFF,
         customers: customerNumbers.map((customerNumber) => {
           const setting = byCustomer.get(customerNumber) ?? null;
           const entry = live.get(customerNumber);
-          const insideCeiling = env.DELIVERY_MODE !== 'test' || sapAllowedCustomers.has(customerNumber);
+          const insideCeiling = (dashboard && Boolean(entry)) || env.DELIVERY_MODE !== 'test' || sapAllowedCustomers.has(customerNumber);
           const livePhone = entry?.primaryPhone ?? null;
           const manager = env.MSG91_MARKETING_COPY_SOURCE === 'sap'
             ? evaluateSapManagerCopy(currentCeilings(), setting, entry?.salesAssignments ?? [])
@@ -162,6 +170,7 @@ messagingRouter.get(
           customerNumber,
           recipient: livePhone,
           documentCreatedAt: new Date().toISOString(),
+          documentDate: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()),
           setting,
           internal: await getInternalRecipient(livePhone),
         })
@@ -176,7 +185,7 @@ messagingRouter.get(
         // Nothing is sent by this endpoint. It only reports what would be decided now.
         checks: [
           check('SAP host is the approved test system', isSapHostApproved),
-          check('Customer is in the server-approved list', ceilings.mode !== 'test' || ceilings.customers.has(customerNumber)),
+          check('Customer can be approved in this deployment', (Boolean(ceilings.dashboardApprovals) && Boolean(entry)) || ceilings.mode !== 'test' || ceilings.customers.has(customerNumber)),
           check('Customer is enabled in Settings', Boolean(setting?.enabled)),
           check('SAP phone matches the approved number', phoneCheck.allowed, phoneCheck.allowed ? undefined : phoneCheck.reason),
           check('A new document would be sent to the customer', sendCheck.allowed, sendCheck.allowed ? undefined : sendCheck.reason),
@@ -189,10 +198,38 @@ messagingRouter.get(
   }),
 );
 
+// Read-only confirmation data. Opening this dialog never approves or queues a send.
+messagingRouter.get('/customers/:customerNumber/approval-preview', asyncHandler(async (request, response) => {
+  const customerNumber = customerNumberSchema.parse(request.params.customerNumber);
+  const directory = await getSapMasterCustomers(true);
+  const entry = directory.items.find(row => row.customerNumber === customerNumber);
+  if (!entry) throw new HttpError(404, 'This customer was not found in SAP');
+  const phone = entry.primaryPhone;
+  const canEnable = Boolean(phone && PHONE_PATTERN.test(phone) &&
+    (isDashboardCustomerApprovalEnabled() || env.DELIVERY_MODE !== 'test' ||
+      (sapAllowedCustomers.has(customerNumber) && whatsappTestRecipients.has(phone))));
+  const previewSetting: CustomerMessagingSetting = {
+    sapCustomerNumber: customerNumber, enabled: true, approvedPhone: phone, enabledAt: new Date().toISOString(),
+    managerName: null, managerPhone: null, managerSource: 'sap', updatedBy: null, updatedAt: null,
+  };
+  const manager = evaluateSapManagerCopy(currentCeilings(), previewSetting, entry.salesAssignments);
+  response.json({ data: {
+    customerNumber, name: entry.name, phone, canEnable, documentCutoff: DOCUMENT_SEND_CUTOFF,
+    sharedPhoneCustomers: directory.items.filter(row => row.customerNumber !== customerNumber &&
+      row.phones.some(value => value.number === phone)).map(row => ({ customerNumber: row.customerNumber, name: row.name })),
+    managerRecipient: manager.allowed && env.MSG91_MARKETING_COPY_ENABLED ? manager.recipient : null,
+    managerReason: !env.MSG91_MARKETING_COPY_ENABLED ? 'Manager copies are disabled' : manager.allowed ? null : manager.reason,
+    blocker: canEnable ? null : !phone || !PHONE_PATTERN.test(phone) ? 'SAP has no valid phone number' :
+      'Dashboard onboarding is not enabled on the server',
+  } });
+}));
+
 const enabledSchema = z.object({
   enabled: z.boolean(),
   // The phone the administrator was shown and is approving.
   expectedPhone: z.string().optional(),
+  acknowledgeRecipient: z.boolean().optional(),
+  acknowledgeSharedPhone: z.boolean().optional(),
 });
 
 messagingRouter.put(
@@ -200,7 +237,6 @@ messagingRouter.put(
   asyncHandler(async (request: AuthenticatedRequest, response) => {
     const customerNumber = customerNumberSchema.parse(request.params.customerNumber);
     const input = enabledSchema.parse(request.body ?? {});
-    requireCeilingCustomer(customerNumber);
     const before = await getCustomerSetting(customerNumber);
     const who = actor(request);
 
@@ -210,17 +246,28 @@ messagingRouter.put(
       response.json({ data: after });
       return;
     }
+    requireCeilingCustomer(customerNumber);
 
     // Enabling always re-reads SAP and approves the phone the administrator saw.
     const entry = await liveCustomer(customerNumber, true);
     if (!entry) throw new HttpError(404, 'This customer was not found in SAP');
     const livePhone = entry.primaryPhone;
-    if (!livePhone) throw new HttpError(409, 'SAP has no phone number for this customer');
+    if (!livePhone || !PHONE_PATTERN.test(livePhone)) throw new HttpError(409, 'SAP has no valid phone number for this customer');
     if (normalizePhone(input.expectedPhone ?? '') !== livePhone) {
       throw new HttpError(409, 'The SAP phone number changed. Reload the list and review the new number.');
     }
-    if (env.DELIVERY_MODE === 'test' && !whatsappTestRecipients.has(livePhone)) {
+    if (!isDashboardCustomerApprovalEnabled() && env.DELIVERY_MODE === 'test' && !whatsappTestRecipients.has(livePhone)) {
       throw new HttpError(403, 'This phone number is not in the server-approved test numbers');
+    }
+    if (isDashboardCustomerApprovalEnabled()) {
+      if (!input.acknowledgeRecipient) throw new HttpError(409, 'Confirm the customer and destination number before enabling');
+      const directory = await getSapMasterCustomers(false);
+      const shared = directory.items.some(row => row.customerNumber !== customerNumber && row.phones.some(phone => phone.number === livePhone));
+      if (shared && !input.acknowledgeSharedPhone) throw new HttpError(409, 'This phone is also used by another SAP customer. Confirm the shared number explicitly.');
+    }
+    if (before?.enabled && before.approvedPhone === livePhone) {
+      response.json({ data: before });
+      return;
     }
     const after = await saveCustomerSetting(
       customerNumber,

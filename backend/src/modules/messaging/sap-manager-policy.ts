@@ -11,7 +11,7 @@ export function evaluateSapManagerCopy(
   queuedRecipient?: string,
 ): ManagerCopyDecision {
   if (!setting?.enabled) return { allowed: false, reason: 'customer is not enabled in Settings' };
-  if (ceilings.mode === 'test' && !ceilings.customers.has(setting.sapCustomerNumber)) {
+  if (!ceilings.dashboardApprovals && ceilings.mode === 'test' && !ceilings.customers.has(setting.sapCustomerNumber)) {
     return { allowed: false, reason: 'customer is outside the server-approved customers' };
   }
   if (!assignments.length) return { allowed: false, reason: 'SAP has no sales-group manager mapping for this customer' };

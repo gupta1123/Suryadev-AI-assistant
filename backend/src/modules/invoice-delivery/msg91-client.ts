@@ -229,6 +229,7 @@ export async function sendPaymentReminderTemplate(
 
 export async function sendHelpRequestAlertTemplate(
   input: Msg91HelpRequestAlertInput,
+  beforeSend: () => Promise<unknown>,
   timeoutMs = 20_000,
 ): Promise<Msg91SendResult> {
   if (!env.MSG91_AUTHKEY || !digitsOnly(env.MSG91_INTEGRATED_NUMBER)) {
@@ -237,7 +238,7 @@ export async function sendHelpRequestAlertTemplate(
   if (!env.MSG91_SEND_ENABLED || !env.MSG91_HELP_REQUEST_ALERT_ENABLED) {
     throw new Error('Help request alert sending is disabled');
   }
-  return sendTemplatePayload(buildMsg91HelpRequestAlertPayload(input), timeoutMs);
+  return sendTemplatePayload(buildMsg91HelpRequestAlertPayload(input), timeoutMs, beforeSend);
 }
 
 export async function sendTemplatePayload(
