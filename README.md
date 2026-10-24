@@ -249,6 +249,32 @@ to every customer at that phone. The enable endpoint re-reads SAP; queued SAP
 messages verify the current phone at dispatch. Test/simulator recipients, payment
 test recipients and manager recipient ceilings remain separate restrictions.
 
+### TMT material controls
+
+With `TMT_MATERIAL_CONTROL_MODE=dashboard`, Settings → TMT materials controls exact
+SAP material IDs. The existing `SAP_TMT_MATERIAL_IDS` are initially On; each saved
+On/Off choice overrides that default. Unknown codes are Off. Description, prefix
+and material-group heuristics cannot override an Off material in dashboard mode.
+Every material line must be On, because the complete PDF is attached. Polling,
+manual enqueue/preview, final document/reminder dispatch, manager copies and
+document-linked help alerts enforce the same controls. Reads at dispatch are
+uncached; errors or missing material lines block sending. Existing customer/date,
+test recipient, template and sender safeguards remain independent requirements.
+
+Approvals use the existing backend-only `system_settings.settings` JSON under
+`tmt_material_controls`; no SQL migration is required. All settings-section writes
+use optimistic compare-and-swap so concurrent reminder/help/material changes do
+not erase each other. Material changes are authenticated, confirmed and audited.
+
+SAP Product Master API access is not currently granted. The list therefore
+discovers codes from readable billing-document items (up to 10,000 source rows),
+not the complete product master. Exact-code lookup and enabling verify the code
+against live SAP billing items. Disabling does not require SAP to be online.
+Turning On can release unsent/skipped eligible documents from 20 October onward
+for already-enabled customers; the confirmation explicitly warns about this.
+No existing sent job is resent by a material toggle. New codes, including
+`30000032`, must be approved by the user, not automatically enabled at deployment.
+
 All document-linked WhatsApp sends have a non-overridable date floor of
 **20 October 2026 inclusive** (India time for creation timestamps). The stored SAP
 billing/document date must meet the floor even when a record is imported later.

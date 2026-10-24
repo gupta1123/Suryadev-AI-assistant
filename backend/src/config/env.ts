@@ -28,6 +28,7 @@ const envSchema = z.object({
   SAP_POLL_START_AT: z.union([z.literal(''), z.string().datetime({ offset: true })]).default(''),
   SAP_ALLOWED_CUSTOMERS: z.string().default(''),
   CUSTOMER_APPROVAL_MODE: z.enum(['server_list', 'dashboard']).default('server_list'),
+  TMT_MATERIAL_CONTROL_MODE: z.enum(['server_list', 'dashboard']).default('server_list'),
   SAP_ALLOWED_BILLING_DOCUMENTS: z.string().default(''),
   SAP_TMT_MATERIAL_IDS: z.string().default(''),
   SAP_TMT_MATERIAL_PREFIXES: z.string().default('TMT,STEEL-TMT'),

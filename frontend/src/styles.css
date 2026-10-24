@@ -141,6 +141,15 @@ td > small { display: block; margin-top: 4px; color: #a1a1aa; font-size: .59rem;
 .modal-header h2 { margin: 0 0 6px; font-size: 1.15rem; letter-spacing: -.02em; color: #09090b; }
 .modal-header p { margin: 0; max-width: 620px; color: #71717a; font-size: .69rem; line-height: 1.5; }
 .modal-body { min-height: 0; padding: 22px 24px 24px; overflow-y: auto; }
+.st-sectionhead { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 18px; }
+.st-sectionhead h2 { font-size: 1.1rem; margin: 0 0 6px; }
+.st-sectionhead p { color: #8a8278; font-size: .85rem; margin: 0; }
+.st-material-lookup { display: flex; align-items: end; gap: 12px; margin: 20px 0; }
+.st-material-lookup label { display: grid; gap: 6px; max-width: 320px; font-size: .85rem; }
+.st-material-table { overflow-x: auto; margin-top: 18px; }
+.st-material-table table { min-width: 760px; width: 100%; }
+.st-material-table small { display: block; }
+@media (max-width: 640px) { .st-sectionhead, .st-material-lookup { align-items: stretch; flex-direction: column; } }
 .st-approval-check { display: flex; align-items: flex-start; gap: 10px; margin: 14px 0; font-size: .82rem; line-height: 1.5; cursor: pointer; }
 .st-approval-check input[type="checkbox"] { flex: 0 0 18px; width: 18px; height: 18px; padding: 0; margin-top: 2px; accent-color: #ea580c; }
 .mode-tabs { width: fit-content; margin-bottom: 22px; padding: 4px; display: flex; gap: 3px; border-radius: 10px; background: #f4f4f5; }

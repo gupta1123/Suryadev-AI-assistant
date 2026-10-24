@@ -8,6 +8,7 @@ import type { InvoiceCandidate, PersistedDelivery } from './domain.js';
 import { createDeliveryIdempotencyKey, formatPhone } from './policy.js';
 import { getBillingDocumentDefinition } from './document-policy.js';
 import { documentDateBlocker } from '../messaging/document-date-policy.js';
+import { tmtMaterialBlocker } from '../messaging/tmt-materials.js';
 
 export type PersistedInvoice = {
   customerId: number;
@@ -81,6 +82,10 @@ export async function persistInvoiceAndEnqueue(
 ): Promise<PersistedDelivery> {
   const dateRefusal = documentDateBlocker({ documentDate: candidate.billingDocumentDate, documentCreatedAt: candidate.creationDateTime });
   if (dateRefusal) throw new HttpError(409, dateRefusal);
+  if (env.TMT_MATERIAL_CONTROL_MODE === 'dashboard') {
+    const materialRefusal = await tmtMaterialBlocker(candidate.items);
+    if (materialRefusal) throw new HttpError(409, materialRefusal);
+  }
   const client = getSupabaseServerClient();
   const runId = await createAgentRun(client, options);
 

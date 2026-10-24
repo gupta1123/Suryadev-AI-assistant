@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { updateSettingsSection } from '../../lib/settings-store.js';
 import {
   digitsOnly,
   helpRequestAlertRecipient,
@@ -69,30 +70,14 @@ export async function saveHelpRequestAlertSettings(
 ): Promise<HelpRequestAlertSettings> {
   const next = helpRequestAlertSettingsSchema.parse(input);
   const client = getSupabaseServerClient();
-  const { data: row, error: loadError } = await client
-    .from('system_settings')
-    .select('settings')
-    .eq('id', 1)
-    .single();
-  if (loadError || !row) {
-    throw new Error(`Unable to load system settings: ${loadError?.message ?? 'Settings row not found'}`);
-  }
-  const settings = isRecord(row.settings) ? row.settings : {};
-  const before = parseStoredHelpRequestAlertSettings(settings.help_request_alerts);
   const updatedAt = new Date().toISOString();
   const stored = {
     recipient: next.recipient,
     updatedAt,
     updatedBy: updatedBy?.username ?? null,
   };
-  const { error } = await client
-    .from('system_settings')
-    .update({
-      settings: { ...settings, help_request_alerts: stored },
-      updated_at: updatedAt,
-    })
-    .eq('id', 1);
-  if (error) throw new Error(`Unable to save Need Help settings: ${error.message}`);
+  const changed = await updateSettingsSection('help_request_alerts', () => stored);
+  const before = parseStoredHelpRequestAlertSettings(changed.before);
   const { error: auditError } = await client.from('audit_logs').insert({
     actor_type: 'user',
     actor_user_id: auditUserId(updatedBy?.id),

@@ -6,6 +6,7 @@ import { formatInvoiceAmount, formatInvoiceDate } from './policy.js';
 import { getHelpRequestAlertSettings } from './help-settings.js';
 import { documentDateBlocker } from '../messaging/document-date-policy.js';
 import { assertDocumentDateAllowed } from '../messaging/guard.js';
+import { assertInvoiceTmtAllowed } from '../messaging/tmt-materials.js';
 
 export type HelpRequestAlertDetails = {
   customerName: string;
@@ -106,6 +107,7 @@ export async function assertHelpAlertDocumentAllowed(reviewTaskId: number): Prom
   const { data: invoice, error } = await client.from('invoices').select('billing_document_date,creation_datetime').eq('id', task.invoice_id).single();
   if (error || !invoice) throw new Error('Unable to verify help alert document date');
   assertDocumentDateAllowed({ documentDate: invoice.billing_document_date, documentCreatedAt: invoice.creation_datetime });
+  await assertInvoiceTmtAllowed(task.invoice_id);
 }
 
 export async function claimNextHelpRequestAlert(

@@ -22,6 +22,7 @@ import {
   requireAdmin,
 } from '../../middleware/auth.js';
 import { assertDocumentSendAllowed, isHelpAlertRecipientPermitted } from '../messaging/guard.js';
+import { tmtMaterialBlocker } from '../messaging/tmt-materials.js';
 import { getInvoiceSource } from './invoice-source.js';
 import { buildInvoicePreview, formatPhone } from './policy.js';
 import {
@@ -383,6 +384,10 @@ async function buildApprovedInvoicePreview(
   // reports a send as allowed that the worker would refuse.
   let settingsRefusal = '';
   try {
+    if (env.TMT_MATERIAL_CONTROL_MODE === 'dashboard') {
+      const reason = await tmtMaterialBlocker(candidate.items);
+      if (reason) throw new HttpError(409, reason);
+    }
     await assertDocumentSendAllowed({
       source: env.INVOICE_SOURCE,
       customerNumber: candidate.customer.customerNumber,

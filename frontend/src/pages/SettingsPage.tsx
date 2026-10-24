@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent }
 import { AppShell } from '../components/AppShell';
 import { ConnectionsTab } from '../components/settings/ConnectionsTab';
 import { CustomersTab } from '../components/settings/CustomersTab';
+import { MaterialsTab } from '../components/settings/MaterialsTab';
 import { buildIssues, type TabId } from '../components/settings/health';
 import { OverviewTab } from '../components/settings/OverviewTab';
 import { RemindersTab } from '../components/settings/RemindersTab';
@@ -22,6 +23,7 @@ import type {
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'overview', label: 'Overview' },
   { id: 'customers', label: 'Customers' },
+  { id: 'materials', label: 'TMT materials' },
   { id: 'reminders', label: 'Reminders' },
   { id: 'connections', label: 'Connections' },
 ];
@@ -171,6 +173,7 @@ export function SettingsPage({
             <CustomersTab messaging={messaging} messagingError={messagingError} onReload={load} />
           )}
           {activeTab === 'reminders' && <RemindersTab paymentConfig={paymentConfig} onSaved={load} />}
+          {activeTab === 'materials' && <MaterialsTab />}
           {activeTab === 'connections' && (
             <ConnectionsTab
               config={config}

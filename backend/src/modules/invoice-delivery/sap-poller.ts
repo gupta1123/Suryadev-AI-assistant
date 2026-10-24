@@ -18,6 +18,7 @@ import { isWhatsappTemplateApproved } from './msg91-client.js';
 import { documentPollBlocker } from '../messaging/guard.js';
 import { CREATED_BEFORE_ENABLED } from '../messaging/policy.js';
 import { documentDateBlocker } from '../messaging/document-date-policy.js';
+import { tmtMaterialBlocker } from '../messaging/tmt-materials.js';
 import {
   getBillingDocumentDefinition,
   isTmtDocument,
@@ -111,7 +112,7 @@ export async function pollSapInvoices(): Promise<SapPollResult> {
           continue;
         }
         const candidate = await source.get(invoice.id);
-        const reason = automaticDeliveryBlocker(candidate) ?? await documentPollBlocker({
+        const reason = automaticDeliveryBlocker(candidate) ?? await tmtMaterialBlocker(candidate.items) ?? await documentPollBlocker({
           customerNumber: candidate.customer.customerNumber,
           livePhone: candidate.contact.normalizedValue,
           creationDateTime: candidate.creationDateTime ?? null,
@@ -186,7 +187,7 @@ export function automaticDeliveryBlocker(
   if (candidate.isCancelled && definition.type !== 'S1') {
     return 'billing document is a cancelled original; waiting for its S1 cancellation document';
   }
-  if (!isTmtDocument(candidate)) return 'billing document does not contain a configured TMT material';
+  if (env.TMT_MATERIAL_CONTROL_MODE !== 'dashboard' && !isTmtDocument(candidate)) return 'billing document does not contain a configured TMT material';
   if (!candidate.pdf.base64) return 'billing document PDF is not available';
   if (!/^[1-9]\d{7,14}$/.test(candidate.contact.normalizedValue)) {
     return 'customer WhatsApp number is invalid';

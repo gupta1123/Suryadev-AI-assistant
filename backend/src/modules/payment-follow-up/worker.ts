@@ -18,6 +18,7 @@ import {
 } from '../invoice-delivery/repository.js';
 import { assertAllowedPaymentRecipient } from './policy.js';
 import { assertPaymentRecipientApproved } from '../messaging/guard.js';
+import { assertInvoiceTmtAllowed } from '../messaging/tmt-materials.js';
 import {
   isPaymentCaseResolved,
   markPaymentReminderAwaitingSent,
@@ -73,10 +74,13 @@ async function processClaimedPaymentJob(
   const context = await getDeliveryJobContext(job);
   const recipient = digitsOnly(String(context.metadata.actual_recipient ?? ''));
   assertAllowedPaymentRecipient(recipient);
-  const assertApproved = () => assertPaymentRecipientApproved(context.customer.sap_customer_number, recipient, {
-    documentDate: context.invoice.billing_document_date,
-    documentCreatedAt: context.invoice.creation_datetime,
-  });
+  const assertApproved = async () => {
+    await assertPaymentRecipientApproved(context.customer.sap_customer_number, recipient, {
+      documentDate: context.invoice.billing_document_date,
+      documentCreatedAt: context.invoice.creation_datetime,
+    });
+    await assertInvoiceTmtAllowed(context.invoice.id);
+  };
   await assertApproved();
   if (!context.payment_follow_up_case_id) {
     throw new Error('Payment reminder job has no follow-up case');

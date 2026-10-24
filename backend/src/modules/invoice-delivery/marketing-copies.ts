@@ -9,6 +9,7 @@ import {
   resolveManagerCopyRecipient,
   assertDocumentDateAllowed,
 } from '../messaging/guard.js';
+import { assertInvoiceTmtAllowed, TmtMaterialRefusal } from '../messaging/tmt-materials.js';
 
 type Components = Record<string, { type: string; value: string; filename?: string }>;
 type TemplatePayload = {
@@ -124,6 +125,7 @@ export async function processMarketingCopyQueue(): Promise<void> {
               documentDate: sourceContext.invoice.billing_document_date,
               documentCreatedAt: sourceContext.invoice.creation_datetime,
             });
+            await assertInvoiceTmtAllowed(sourceContext.invoice.id);
             dispatched = true;
           },
         );
@@ -137,7 +139,7 @@ export async function processMarketingCopyQueue(): Promise<void> {
           last_error: result.ok ? null : `MSG91 copy HTTP ${result.statusCode}; ambiguous=${result.ambiguous}`,
         });
       } catch (error) {
-        if (error instanceof MessagingRefusal) {
+        if (error instanceof MessagingRefusal || error instanceof TmtMaterialRefusal) {
           // A policy refusal is final: never retry it, and never send.
           await save(Number(row.id), { status: 'failed', last_error: error.message.slice(0, 2000) });
           continue;

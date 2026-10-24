@@ -33,6 +33,7 @@ import {
   writeMessagingAudit,
 } from './repository.js';
 import { DOCUMENT_SEND_CUTOFF } from './document-date-policy.js';
+import { listTmtMaterials, materialCodeSchema, setTmtMaterial } from './tmt-materials.js';
 
 const customerNumberSchema = z.string().regex(/^[A-Za-z0-9]{1,20}$/);
 const phoneParamSchema = z.string().regex(PHONE_PATTERN);
@@ -49,6 +50,20 @@ function actor(request: AuthenticatedRequest) {
     username: request.auth?.user.username ?? 'admin',
   };
 }
+
+messagingRouter.get('/tmt-materials', asyncHandler(async (request, response) => {
+  const query = z.object({ refresh: z.enum(['true', 'false']).optional(), code: materialCodeSchema.optional() }).parse(request.query);
+  response.json({ data: await listTmtMaterials(query.refresh === 'true', query.code) });
+}));
+messagingRouter.put('/tmt-materials/:code', asyncHandler(async (request: AuthenticatedRequest, response) => {
+  const code = materialCodeSchema.parse(request.params.code);
+  const input = z.object({ enabled: z.boolean(), expectedEnabled: z.boolean(), confirmMaterial: z.string(), acknowledgePending: z.boolean() }).parse(request.body);
+  if (input.confirmMaterial !== code || !input.acknowledgePending) throw new HttpError(409, 'Confirm the material code and pending-document warning');
+  const who = actor(request);
+  const changed = await setTmtMaterial(code, input.enabled, input.expectedEnabled, who.username);
+  await writeMessagingAudit({ action: input.enabled ? 'tmt_material_enabled' : 'tmt_material_disabled', entityId: code, before: changed.before, after: changed.after, ...who });
+  response.json({ data: { code, enabled: input.enabled, updatedAt: changed.updatedAt } });
+}));
 
 function requireCeilingCustomer(customerNumber: string): void {
   // Legacy test deployments retain their server list; dashboard mode requires

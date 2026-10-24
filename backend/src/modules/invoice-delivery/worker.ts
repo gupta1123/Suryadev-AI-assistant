@@ -17,6 +17,7 @@ import {
 } from './msg91-client.js';
 import { formatInvoiceAmount, formatInvoiceDate } from './policy.js';
 import { assertDocumentSendAllowed, jobSource } from '../messaging/guard.js';
+import { assertInvoiceTmtAllowed } from '../messaging/tmt-materials.js';
 import { getBillingDocumentDefinition } from './document-policy.js';
 import {
   claimNextDeliveryJob,
@@ -93,13 +94,16 @@ async function processClaimedJob(job: Awaited<ReturnType<typeof claimNextDeliver
     throw new Error('Delivery worker refused a recipient outside the test allowlist');
   }
   // Check before preparing anything, then again at the HTTP dispatch boundary.
-  const assertApproved = () => assertDocumentSendAllowed({
-    source: jobSource(context.metadata),
-    customerNumber: context.customer.sap_customer_number,
-    recipient,
-    documentCreatedAt: context.invoice.creation_datetime,
-    documentDate: context.invoice.billing_document_date,
-  });
+  const assertApproved = async () => {
+    await assertDocumentSendAllowed({
+      source: jobSource(context.metadata),
+      customerNumber: context.customer.sap_customer_number,
+      recipient,
+      documentCreatedAt: context.invoice.creation_datetime,
+      documentDate: context.invoice.billing_document_date,
+    });
+    await assertInvoiceTmtAllowed(context.invoice.id);
+  };
   await assertApproved();
 
   const documentDefinition = getBillingDocumentDefinition(context.invoice.billing_document_type);

@@ -16,6 +16,7 @@ import {
   sendHelpRequestAlertTemplate,
 } from './msg91-client.js';
 import { isHelpAlertRecipientPermitted, MessagingRefusal } from '../messaging/guard.js';
+import { TmtMaterialRefusal } from '../messaging/tmt-materials.js';
 
 let timer: NodeJS.Timeout | undefined;
 let running = false;
@@ -91,7 +92,7 @@ export async function processHelpRequestAlertQueue(): Promise<void> {
         await markHelpRequestAlertFailed(notification, message, terminal);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown help request alert error';
-        await markHelpRequestAlertFailed(notification, message, error instanceof MessagingRefusal);
+        await markHelpRequestAlertFailed(notification, message, error instanceof MessagingRefusal || error instanceof TmtMaterialRefusal);
       }
     }
   } catch (error) {

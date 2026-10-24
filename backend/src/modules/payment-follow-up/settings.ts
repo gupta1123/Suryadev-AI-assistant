@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { updateSettingsSection } from '../../lib/settings-store.js';
 import { env } from '../../config/env.js';
 import { getSupabaseServerClient } from '../../lib/supabase.js';
 
@@ -65,25 +66,9 @@ export async function saveReminderSettings(
 ): Promise<ReminderSettings> {
   const next = reminderSettingsSchema.parse(input);
   const client = getSupabaseServerClient();
-  const { data: row, error: loadError } = await client
-    .from('system_settings')
-    .select('settings')
-    .eq('id', 1)
-    .single();
-  if (loadError || !row) {
-    throw new Error(`Unable to load system settings: ${loadError?.message ?? 'Settings row not found'}`);
-  }
-  const settings = isRecord(row.settings) ? row.settings : {};
-  const before = parseStoredReminderSettings(settings.payment_reminders);
   const updatedAt = new Date().toISOString();
-  const { error } = await client
-    .from('system_settings')
-    .update({
-      settings: { ...settings, payment_reminders: { ...next, updatedAt, updatedBy: updatedBy?.username ?? null } },
-      updated_at: updatedAt,
-    })
-    .eq('id', 1);
-  if (error) throw new Error(`Unable to save payment reminder settings: ${error.message}`);
+  const changed = await updateSettingsSection('payment_reminders', () => ({ ...next, updatedAt, updatedBy: updatedBy?.username ?? null }));
+  const before = parseStoredReminderSettings(changed.before);
   await client.from('audit_logs').insert({
     actor_type: 'user',
     actor_user_id: auditUserId(updatedBy?.id),
