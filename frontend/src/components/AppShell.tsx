@@ -1,7 +1,6 @@
-import { BadgeIndianRupee, BellRing, FileText, Home, LogOut, Settings, Users, type LucideIcon } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { BadgeIndianRupee, FileText, Home, LogOut, Settings, Users, type LucideIcon } from 'lucide-react';
+import type { ReactNode } from 'react';
 import logoImg from '../assets/suryadev-logo.jpg';
-import { loadInbox, subscribeInboxCount } from '../lib/inbox';
 import type { AdminUser, AppRoute } from '../types';
 
 type NavItem = { path: string; label: string; short: string; icon: LucideIcon; pages: AppRoute['page'][] };
@@ -10,7 +9,6 @@ const HOME_NAV: NavItem = { path: '/', label: 'Home', short: 'Home', icon: Home,
 const DAILY_WORK_NAV: NavItem[] = [
   { path: '/documents', label: 'Documents', short: 'Documents', icon: FileText, pages: ['deliveries', 'delivery'] },
   { path: '/payments', label: 'Payment followup', short: 'Followup', icon: BadgeIndianRupee, pages: ['paymentFollowUps', 'paymentFollowUp'] },
-  { path: '/attention', label: 'Needs attention', short: 'Attention', icon: BellRing, pages: ['inbox'] },
 ];
 const MANAGEMENT_NAV: NavItem[] = [
   { path: '/customers', label: 'Customers', short: 'Customers', icon: Users, pages: ['customers', 'customer'] },
@@ -18,17 +16,6 @@ const MANAGEMENT_NAV: NavItem[] = [
 // Mobile keeps one compact row, in the same order as the desktop groups.
 const MAIN_NAV: NavItem[] = [HOME_NAV, ...DAILY_WORK_NAV, ...MANAGEMENT_NAV];
 const SETTINGS_NAV: NavItem = { path: '/settings', label: 'Settings', short: 'Settings', icon: Settings, pages: ['settings'] };
-
-function useInboxCount(): number | null {
-  const [count, setCount] = useState<number | null>(null);
-  useEffect(() => {
-    const unsubscribe = subscribeInboxCount(setCount);
-    void loadInbox().catch(() => undefined);
-    const timer = window.setInterval(() => { void loadInbox(true).catch(() => undefined); }, 60_000);
-    return () => { unsubscribe(); window.clearInterval(timer); };
-  }, []);
-  return count;
-}
 
 export function AppShell({
   route,
@@ -56,7 +43,6 @@ export function AppShell({
   onLogout: () => Promise<void>;
   loggingOut: boolean;
 }) {
-  const inboxCount = useInboxCount();
 
   function renderNav(item: NavItem) {
     const Icon = item.icon;
@@ -71,7 +57,6 @@ export function AppShell({
       >
         <Icon size={17} aria-hidden="true" />
         <span>{item.label}</span>
-        {item.path === '/attention' && inboxCount ? <span className="nav-badge" aria-label={`${inboxCount} items`}>{inboxCount > 99 ? '99+' : inboxCount}</span> : null}
       </button>
     );
   }
@@ -134,7 +119,6 @@ export function AppShell({
             <button key={item.path} className={active ? 'mobile-nav--active' : ''} type="button" onClick={() => onNavigate(item.path)}>
               <span className="mobile-nav__icon">
                 <Icon size={19} aria-hidden="true" />
-                {item.path === '/attention' && inboxCount ? <i className="mobile-nav__dot" /> : null}
               </span>
               {item.short}
             </button>
