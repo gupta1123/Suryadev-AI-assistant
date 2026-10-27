@@ -29,7 +29,7 @@ export async function listEligiblePaymentInvoices() {
   const existing = new Map<string, {customers: unknown;payment_follow_up_cases: unknown;invoice_receivables: unknown}>();
   for (let offset=0; ; offset+=500) {
     if (offset>=10000) throw new Error('Existing invoice discovery exceeds its safety limit');
-    const page = await client.from('invoices').select('id,sap_billing_document,customers(display_name),payment_follow_up_cases(id),invoice_receivables(payment_status,outstanding_amount)')
+    const page = await client.from('invoices').select('id,sap_billing_document,customers!invoices_sold_to_customer_id_fkey(display_name),payment_follow_up_cases(id),invoice_receivables(payment_status,outstanding_amount)')
       .order('id').range(offset,offset+499);
     if (page.error) throw new Error('Unable to verify the complete existing journey list');
     for (const row of page.data ?? []) existing.set(row.sap_billing_document,row);

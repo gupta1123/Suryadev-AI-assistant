@@ -11,7 +11,7 @@ export async function assertManualJourneyAllowed(caseId: number, invoiceId: numb
   const [caseResult, balanceResult, invoiceResult] = await Promise.all([
     client.from('payment_follow_up_cases').select('id,invoice_id,status,resolved_at').eq('id',caseId).single(),
     client.from('invoice_receivables').select('outstanding_amount,payment_status,due_date,raw_data').eq('invoice_id',invoiceId).single(),
-    client.from('invoices').select('id,sold_to_customer_id,sap_billing_document,billing_document_type,billing_document_date,creation_datetime,is_cancelled,customers(sap_customer_number)').eq('id',invoiceId).single(),
+    client.from('invoices').select('id,sold_to_customer_id,sap_billing_document,billing_document_type,billing_document_date,creation_datetime,is_cancelled,customers!invoices_sold_to_customer_id_fkey(sap_customer_number)').eq('id',invoiceId).single(),
   ]);
   if (caseResult.error || balanceResult.error || invoiceResult.error) throw new Error('Unable to verify the current manual journey; sending is blocked');
   const paymentCase = caseResult.data, balance = balanceResult.data, invoice = invoiceResult.data;
