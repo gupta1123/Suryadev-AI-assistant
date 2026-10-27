@@ -27,10 +27,10 @@ h1, h2, h3, p { margin-top: 0; }
    and multiply-blend its white background into the sidebar colour. */
 .brand { justify-content: center; }
 .brand-logo { width: 100%; max-width: 176px; aspect-ratio: 2 / 1; display: block; object-fit: cover; object-position: center 51%; mix-blend-mode: multiply; }
-.primary-nav { margin-top: 20px; display: flex; flex-direction: column; gap: 20px; }
+.primary-nav { margin-top: 20px; display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow-y: auto; }
 .nav-section { display: flex; flex-direction: column; gap: 4px; }
 .nav-section + .nav-section { padding-top: 17px; border-top: 1px solid #ded9cf; }
-.nav-section-label { margin: 0 0 4px; padding: 0 9px; color: #aaa298; font-size: .55rem; font-weight: 850; letter-spacing: .12em; text-transform: uppercase; }
+.nav-section-label { margin: 0 0 4px; padding: 0 11px; color: #756c61; font-size: .6rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
 .nav-link { width: 100%; min-height: 39px; padding: 0 11px; display: flex; align-items: center; gap: 10px; border: 1px solid transparent; border-radius: 8px; color: #716b63; background: transparent; font-size: .72rem; font-weight: 730; text-align: left; }
 .nav-link:hover { color: #28231d; background: #ece7dd; }
 .nav-link--active { color: #2c251e; border-color: #ded4c6; background: #eae3d8; box-shadow: inset 3px 0 #ea580c; }
@@ -1509,6 +1509,24 @@ input[aria-invalid="true"] { border-color: #dc2626; }
 .marketing-copy [data-copy-status="failed"],
 .marketing-copy [data-copy-status="unknown"] { color: #b42318; }
 .marketing-copy [data-copy-status="accepted"] { color: #166534; }
+.dd-details > .marketing-copy { margin: 0; padding: 20px 22px; gap: 10px; background: #fcfaf7; }
+.dd-details > .marketing-copy > strong { font-size: 14px; }
+.dd-details > .marketing-copy > div { padding: 12px 14px; border: 1px solid #e5dfd5; border-radius: 12px; background: #fff; }
+.dd-details > .marketing-copy p { display: flex; flex-wrap: wrap; gap: 5px; line-height: 1.6; }
+.dd-details > .marketing-copy small { display: block; margin-top: 4px; }
+.dd-message-previews { position: sticky; top: 76px; min-width: 0; display: grid; gap: 12px; }
+.dd-preview-switch { display: flex; padding: 4px; gap: 4px; border: 1px solid #e5dfd5; border-radius: 14px; background: #fff; }
+.dd-preview-switch button { flex: 1; min-width: 0; padding: 10px 8px; border: 0; border-radius: 10px; background: transparent; color: #756b60; font: inherit; font-size: 12px; font-weight: 650; cursor: pointer; }
+.dd-preview-switch button[aria-pressed="true"] { color: #bd4109; background: #fff1e7; }
+.pf--doc .dd-message-previews .pf-phone { position: relative; top: auto; width: 100%; max-height: min(560px, calc(100vh - 165px)); }
+.dd-preview-empty { padding: 24px; border: 1px solid #e5dfd5; border-radius: 20px; background: #fff; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.dd-preview-empty p { color: #756b60; }
+.dd-copy-select { display: grid; gap: 6px; font-size: 12px; color: #756b60; }
+.dd-copy-select select { width: 100%; min-width: 0; padding: 10px; border: 1px solid #e5dfd5; border-radius: 10px; background: #fff; font: inherit; }
+@media (max-width: 1100px) {
+  .dd-message-previews { position: static; }
+  .pf--doc .dd-message-previews .pf-phone { max-height: 560px; }
+}
 .manager-copies { border: 1px solid #e5dfd5; border-radius: 16px; background: #fff; overflow: hidden; }
 .manager-copies__intro { padding: 20px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
 .manager-copies__intro p, .manager-copies__intro small { color: #756b60; font-size: 12px; line-height: 1.5; margin: 6px 0 0; }
@@ -1526,6 +1544,6 @@ input[aria-invalid="true"] { border-color: #dc2626; }
 .manager-copies__empty, .manager-copies__error { padding: 24px; margin: 0; }
 .manager-copies__error { color: #b42318; }
 @media (max-width: 820px) {
-  .mobile-nav.mobile-nav--six { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-  .mobile-nav.mobile-nav--six button { font-size: 10px; min-width: 0; }
+  .mobile-nav.mobile-nav--five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .mobile-nav.mobile-nav--five button { font-size: 10px; min-width: 0; }
 }

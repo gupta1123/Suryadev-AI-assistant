@@ -72,7 +72,7 @@ export function MarketingManagerPage(props: {
     return () => { window.clearInterval(timer); sequence.current++; };
   }, [load]);
   return (
-    <AppShell {...props} title="Marketing manager" eyebrow="Customer message copies" actions={
+    <AppShell {...props} title="Manager copies" eyebrow="Customer message copies" actions={
       <button className="button button--secondary" disabled={loading} onClick={() => void load()}><RefreshCw size={16} /> Refresh</button>
     }>
       <section className="list-section" aria-label="Marketing manager message history">

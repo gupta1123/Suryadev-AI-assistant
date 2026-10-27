@@ -99,7 +99,7 @@ export function PaymentFollowUpsPage({
     <AppShell
       route={route}
       eyebrow="Unpaid invoices and their reminders"
-      title="Payments"
+      title="Payment followup"
       onNavigate={onNavigate}
       user={user}
       onLogout={onLogout}

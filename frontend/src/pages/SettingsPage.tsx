@@ -22,10 +22,10 @@ import type {
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'overview', label: 'Overview' },
-  { id: 'customers', label: 'Customers' },
+  { id: 'customers', label: 'Customer messaging' },
   { id: 'materials', label: 'TMT materials' },
-  { id: 'reminders', label: 'Reminders' },
-  { id: 'connections', label: 'Connections' },
+  { id: 'reminders', label: 'Reminder timing' },
+  { id: 'connections', label: 'Connections & templates' },
 ];
 
 // Addresses from the previous seven-section layout keep working.

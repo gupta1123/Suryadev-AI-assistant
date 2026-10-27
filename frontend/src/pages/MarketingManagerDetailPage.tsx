@@ -8,7 +8,7 @@ import { billingDocumentAmountLabel, billingDocumentAttachmentMessage, billingDo
 import { formatDate, formatDateTime, toMessage } from '../lib/format';
 import type { AdminUser, AppRoute } from '../types';
 
-type Detail = {
+export type MarketingCopyDetail = {
   id: number; sourceJobId: number; recipient: string;
   status: 'pending' | 'processing' | 'accepted' | 'failed' | 'unknown';
   attemptCount: number; acceptedAt: string | null; createdAt: string; lastError: string | null;
@@ -21,14 +21,14 @@ export function MarketingManagerDetailPage(props: {
   route: AppRoute; copyId: number; onNavigate: (path: string) => void;
   user: AdminUser; onLogout: () => Promise<void>; loggingOut: boolean;
 }) {
-  const [copy, setCopy] = useState<Detail | null>(null);
+  const [copy, setCopy] = useState<MarketingCopyDetail | null>(null);
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [showPdf, setShowPdf] = useState(false);
   const load = useCallback(async (silent = false) => {
     setRefreshing(true);
     try {
-      const next = await apiRequest<Detail>(`/invoice-delivery/marketing-copies/${props.copyId}`);
+      const next = await apiRequest<MarketingCopyDetail>(`/invoice-delivery/marketing-copies/${props.copyId}`);
       setCopy((previous) => silent && previous?.document && next.document ? { ...next, document: previous.document } : next);
       setError('');
     } catch (e) { setError(toMessage(e)); }
@@ -46,10 +46,8 @@ export function MarketingManagerDetailPage(props: {
   const amount = Number((amountText ?? '').replace(/,/g, ''));
   const critical = copy?.status === 'failed' || copy?.status === 'unknown';
   const statusLabel = copy ? ({ pending: 'Copy queued', processing: 'Sending copy', accepted: 'Provider accepted', failed: 'Copy failed', unknown: 'Outcome unknown' })[copy.status] : '';
-  const modern = copy?.templateName !== 'share_invoice';
-  const buttons = ['share_invoice', 'share_invoice_with_buttons_v2'].includes(copy?.templateName ?? '');
 
-  return <AppShell {...props} title={copy ? `${label} ${copy.documentNumber}` : 'Marketing manager copy'} eyebrow="Marketing manager copy" headerLeading={<BackLink fallbackPath="/marketing-manager" fallbackLabel="Marketing manager" onNavigate={props.onNavigate} />}>
+  return <AppShell {...props} title={copy ? `${label} ${copy.documentNumber}` : 'Manager copy'} eyebrow="Manager copy" headerLeading={<BackLink fallbackPath="/marketing-manager" fallbackLabel="Manager copies" onNavigate={props.onNavigate} />}>
     {error && <div className="alert alert--error">{error}</div>}
     {!copy ? !error && <div className="detail-skeleton"><span /><div><span /><span /></div></div> : (
       <div className="pf pf--stack pf--doc" data-tone={critical ? 'critical' : 'calm'}>
@@ -86,10 +84,23 @@ export function MarketingManagerDetailPage(props: {
               <details className="ds-tech pf-tech"><summary>Technical details</summary><dl className="dt-details dt-details--stacked"><div><dt>Copy reference</dt><dd>#{copy.id}</dd></div><div><dt>Template</dt><dd>{copy.templateName}</dd></div><div><dt>Attempts</dt><dd>{copy.attemptCount}</dd></div></dl></details>
             </section>
           </div>
-          <PhoneFrame name="Marketing manager" subtitle={copy.recipient} badge={label}>
+          <MarketingCopyMessage copy={copy} onViewPdf={() => setShowPdf(true)} />
+        </div>
+      </div>
+    )}
+  </AppShell>;
+}
+
+export function MarketingCopyMessage({ copy, onViewPdf }: { copy: MarketingCopyDetail; onViewPdf?: () => void }) {
+  const label = copy.kind === 'reminder' ? 'Payment reminder' : billingDocumentLabel(copy.documentType);
+  const variables = copy.variables;
+  const modern = copy.templateName !== 'share_invoice';
+  const buttons = ['share_invoice', 'share_invoice_with_buttons_v2'].includes(copy.templateName);
+  const statusLabel = ({ pending: 'Copy queued', processing: 'Sending copy', accepted: 'Provider accepted', failed: 'Copy failed', unknown: 'Outcome unknown' })[copy.status];
+  return <PhoneFrame name="Marketing manager" subtitle={copy.recipient} badge={label}>
             <section className="pf-day"><h4>{formatDate(copy.acceptedAt ?? copy.createdAt)}</h4><div className="pf-turn"><Bubble scheduled time={formatTime(copy.acceptedAt ?? copy.createdAt)}>
-              {copy.document && <div className="dt-attachment"><span className="dt-attachment__icon"><FileText size={18} /></span><span className="dt-attachment__name"><strong>{copy.document.fileName}</strong><small>PDF</small></span><button onClick={() => setShowPdf(true)} aria-label="View manager copy PDF"><ExternalLink size={15} /></button></div>}
-              <p>{modern ? 'Hello' : 'Dear'} {copy.customerName},</p>
+              {copy.document && <div className="dt-attachment"><span className="dt-attachment__icon"><FileText size={18} /></span><span className="dt-attachment__name"><strong>{copy.document.fileName}</strong><small>PDF</small></span>{onViewPdf ? <button onClick={onViewPdf} aria-label="View manager copy PDF"><ExternalLink size={15} /></button> : <a href={copy.document.url} target="_blank" rel="noreferrer" aria-label="Open manager copy PDF"><ExternalLink size={15} /></a>}</div>}
+              <p>{modern ? 'Hello' : 'Dear'} {variables.var_1 ?? copy.customerName},</p>
               {copy.kind === 'reminder' ? <><p>This is a payment reminder for <strong>₹{variables.var_2}</strong> pending against invoice <strong>{variables.var_3}</strong> dated <strong>{variables.var_4}</strong>.</p><p>Please arrange payment at your earliest convenience. If payment is not made on or before the due date, interest will be levied at 24% per annum. If payment has already been made, please ignore this message.</p><p>Regards,<br />Suryadev Alloys and Power Private Limited</p></> : <>
                 <p>{billingDocumentMessage(copy.documentType, variables.var_2 ?? copy.documentNumber, variables.var_3 ?? formatDate(copy.documentDate), copy.templateName)}</p>
                 <p><strong>{billingDocumentAmountLabel(copy.documentType)}:</strong> ₹{variables.var_4}</p>
@@ -100,9 +111,5 @@ export function MarketingManagerDetailPage(props: {
               </>}
               <small>{formatTime(copy.acceptedAt ?? copy.createdAt)} · {statusLabel}</small>
             </Bubble><p className="pf-notice">Message preview. No manager delivery/read confirmation is inferred.</p></div></section>
-          </PhoneFrame>
-        </div>
-      </div>
-    )}
-  </AppShell>;
+          </PhoneFrame>;
 }

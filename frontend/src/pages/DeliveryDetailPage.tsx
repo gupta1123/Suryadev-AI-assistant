@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { BackLink } from '../components/BackLink';
 import { MarketingCopyStatus } from '../components/MarketingCopyStatus';
+import { DocumentMessagePreviews } from '../components/DocumentMessagePreviews';
 import { Amount, Bubble, Journey, PhoneFrame, formatTime, rise, type JourneyItem, type PageTone } from '../components/statement';
 import { apiRequest } from '../lib/api';
 import {
@@ -247,6 +248,7 @@ export function DeliveryDetailPage({
               </section>
             </div>
 
+            <DocumentMessagePreviews key={job.id} info={job.marketing_copy}>
             <PhoneFrame name={who} subtitle={job.metadata?.masked_recipient} badge={documentLabel} style={rise(2)}>
             <section className="pf-day" aria-label="Message">
               <h4>{formatDate(message?.sent_at ?? job.created_at)}</h4>
@@ -284,6 +286,7 @@ export function DeliveryDetailPage({
               </div>
             </section>
           </PhoneFrame>
+          </DocumentMessagePreviews>
           </div>
         </div>
       )}

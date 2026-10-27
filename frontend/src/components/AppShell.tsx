@@ -1,4 +1,4 @@
-import { BadgeIndianRupee, BellRing, Copy, FileText, Home, LogOut, Settings, Users, type LucideIcon } from 'lucide-react';
+import { BadgeIndianRupee, BellRing, FileText, Home, LogOut, Settings, Users, type LucideIcon } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import logoImg from '../assets/suryadev-logo.jpg';
 import { loadInbox, subscribeInboxCount } from '../lib/inbox';
@@ -6,14 +6,17 @@ import type { AdminUser, AppRoute } from '../types';
 
 type NavItem = { path: string; label: string; short: string; icon: LucideIcon; pages: AppRoute['page'][] };
 
-const MAIN_NAV: NavItem[] = [
-  { path: '/', label: 'Home', short: 'Home', icon: Home, pages: ['overview'] },
-  { path: '/attention', label: 'Needs attention', short: 'Attention', icon: BellRing, pages: ['inbox'] },
+const HOME_NAV: NavItem = { path: '/', label: 'Home', short: 'Home', icon: Home, pages: ['overview'] };
+const DAILY_WORK_NAV: NavItem[] = [
   { path: '/documents', label: 'Documents', short: 'Documents', icon: FileText, pages: ['deliveries', 'delivery'] },
-  { path: '/marketing-manager', label: 'Marketing manager', short: 'Copies', icon: Copy, pages: ['marketingManager', 'marketingManagerDetail'] },
-  { path: '/customers', label: 'Customers', short: 'Customers', icon: Users, pages: ['customers', 'customer'] },
-  { path: '/payments', label: 'Payments', short: 'Payments', icon: BadgeIndianRupee, pages: ['paymentFollowUps', 'paymentFollowUp'] },
+  { path: '/payments', label: 'Payment followup', short: 'Followup', icon: BadgeIndianRupee, pages: ['paymentFollowUps', 'paymentFollowUp'] },
+  { path: '/attention', label: 'Needs attention', short: 'Attention', icon: BellRing, pages: ['inbox'] },
 ];
+const MANAGEMENT_NAV: NavItem[] = [
+  { path: '/customers', label: 'Customers', short: 'Customers', icon: Users, pages: ['customers', 'customer'] },
+];
+// Mobile keeps one compact row, in the same order as the desktop groups.
+const MAIN_NAV: NavItem[] = [HOME_NAV, ...DAILY_WORK_NAV, ...MANAGEMENT_NAV];
 const SETTINGS_NAV: NavItem = { path: '/settings', label: 'Settings', short: 'Settings', icon: Settings, pages: ['settings'] };
 
 function useInboxCount(): number | null {
@@ -82,7 +85,15 @@ export function AppShell({
 
         <nav className="primary-nav" aria-label="Primary navigation">
           <div className="nav-section">
-            {MAIN_NAV.map(renderNav)}
+            {renderNav(HOME_NAV)}
+          </div>
+          <div className="nav-section" role="group" aria-labelledby="nav-daily-work-label">
+            <p id="nav-daily-work-label" className="nav-section-label">Daily work</p>
+            {DAILY_WORK_NAV.map(renderNav)}
+          </div>
+          <div className="nav-section" role="group" aria-labelledby="nav-management-label">
+            <p id="nav-management-label" className="nav-section-label">Management</p>
+            {MANAGEMENT_NAV.map(renderNav)}
           </div>
           <div className="nav-section nav-section--bottom">
             {renderNav(SETTINGS_NAV)}
@@ -115,7 +126,7 @@ export function AppShell({
         </main>
       </div>
 
-      <nav className="mobile-nav mobile-nav--six" aria-label="Mobile navigation">
+      <nav className="mobile-nav mobile-nav--five" aria-label="Mobile navigation">
         {MAIN_NAV.map((item) => {
           const Icon = item.icon;
           const active = item.pages.includes(route.page);
