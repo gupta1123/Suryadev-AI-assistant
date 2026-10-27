@@ -19,7 +19,7 @@ import {
   withCurrentAging,
 } from './policy.js';
 import { formatPhone } from '../invoice-delivery/policy.js';
-import { auditUserId, getReminderSettings, journeySettings } from './settings.js';
+import { auditUserId, defaultReminderSettings, getReminderSettings, journeySettings } from './settings.js';
 import { assertManualJourneyAllowed } from './journey-guard.js';
 import { paymentDetailsForStorage, type PaymentDetails } from './payment-details.js';
 import { documentDateBlocker } from '../messaging/document-date-policy.js';
@@ -388,6 +388,7 @@ export async function listPaymentCases(): Promise<Record<string, unknown>[]> {
     const caseId = Number(job.payment_follow_up_case_id);
     if (!latestJobs.has(caseId) && inCycle(job, caseCycles.get(caseId))) latestJobs.set(caseId, job);
   }
+  const reminderCounts = countRemindersByCase(jobsResult.data ?? [], caseCycles);
 
   return cases.map((paymentCase) => {
     const invoice = invoices.get(Number(paymentCase.invoice_id));
@@ -399,8 +400,30 @@ export async function listPaymentCases(): Promise<Record<string, unknown>[]> {
       customer: customer ?? null,
       receivable: receivables.get(Number(paymentCase.invoice_id)) ?? null,
       latestJob: job ? sanitizeJob(job) : null,
+      reminder_count: reminderCounts.get(Number(paymentCase.id)) ?? 0,
+      reminder_limit: reminderLimit(receivables.get(Number(paymentCase.invoice_id))),
     };
   });
+}
+
+/** Reminders per case in its current cycle: the same jobs the scheduler counts against the cap. */
+export function countRemindersByCase(
+  jobs: Array<Record<string, unknown>>,
+  cycles: Map<number, string | undefined>,
+): Map<number, number> {
+  const counts = new Map<number, number>();
+  for (const job of jobs) {
+    const caseId = Number(job.payment_follow_up_case_id);
+    if (!inCycle(job, cycles.get(caseId))) continue;
+    counts.set(caseId, (counts.get(caseId) ?? 0) + 1);
+  }
+  return counts;
+}
+
+// A journey keeps the limit frozen when it started; older demo journeys fall back to the server default.
+function reminderLimit(receivable: Record<string, unknown> | undefined): number {
+  try { return journeySettings(receivable?.raw_data, defaultReminderSettings()).maximumReminders; }
+  catch { return defaultReminderSettings().maximumReminders; }
 }
 
 // A demo invoice can be run many times. Each run stores its cycle ID on the

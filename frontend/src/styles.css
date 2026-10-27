@@ -1588,3 +1588,8 @@ input[aria-invalid="true"] { border-color: #dc2626; }
 @media (max-width: 640px) { .side-panel__head, .side-panel__body, .side-panel__foot { padding-left: 18px; padding-right: 18px; } .bulk-bar { flex-wrap: wrap; } }
 .pagination__size span { white-space: nowrap; }
 .pagination__size select { width: auto; }
+.journey-pill { padding: 3px 9px; display: inline-block; border-radius: 999px; font-size: .64rem; font-weight: 750; }
+.journey-pill--live { color: #1d4ed8; background: #dbeafe; }
+.journey-pill--done { color: #9a3412; background: #ffedd5; }
+.journey-pill--paused { color: #52525b; background: #f4f4f5; }
+.journey-pill--paid { color: #15803d; background: #dcfce7; }

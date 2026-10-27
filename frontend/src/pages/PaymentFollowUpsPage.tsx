@@ -423,6 +423,24 @@ function SendNowPanel({ cases, onClose, onFinished }: { cases: PaymentFollowUpCa
   </SidePanel>;
 }
 
+type JourneyTone = 'live' | 'done' | 'paused' | 'paid';
+
+/** Where a journey stands: still reminding, finished all its reminders, stopped, or paid. */
+export function journeyState(paymentCase: PaymentFollowUpCase): { label: string; tone: JourneyTone; detail: string } {
+  const count = paymentCase.reminder_count ?? 0;
+  const limit = paymentCase.reminder_limit ?? 0;
+  const sent = limit > 0 ? `${count} of ${limit} reminders sent` : `${count} ${count === 1 ? 'reminder' : 'reminders'} sent`;
+  if (isSettled(paymentCase)) return { label: 'Paid', tone: 'paid', detail: sent };
+  if (paymentCase.status === 'paused' && limit > 0 && count >= limit) return { label: 'Completed', tone: 'done', detail: `${sent} · awaiting payment` };
+  if (paymentCase.status === 'paused') return { label: 'Paused', tone: 'paused', detail: sent };
+  return { label: 'In progress', tone: 'live', detail: sent };
+}
+
+function JourneyState({ paymentCase }: { paymentCase: PaymentFollowUpCase }) {
+  const state = journeyState(paymentCase);
+  return <><span className={`journey-pill journey-pill--${state.tone}`}>{state.label}</span><small>{state.detail}</small></>;
+}
+
 function latenessLabel(paymentCase: PaymentFollowUpCase): string {
   if (isSettled(paymentCase)) return 'Paid';
   if (!paymentCase.receivable) return '—';
@@ -466,7 +484,7 @@ function PaymentCasesTable({
       <table>
         <thead><tr>
           {selection && <th className="select-cell"><input type="checkbox" aria-label="Select all journeys that can send now" checked={selection.allPicked} onChange={(event) => selection.onToggleAll(event.target.checked)} /></th>}
-          <th>Customer</th><th>Invoice</th><th>Payment</th><th>Due date</th><th>Last reminder</th><th aria-label="Open" /></tr></thead>
+          <th>Customer</th><th>Invoice</th><th>Payment</th><th>Due date</th><th>Journey</th><th>Last reminder</th><th aria-label="Open" /></tr></thead>
         <tbody>
           {cases.map((paymentCase) => {
             const status = reminderStatus(paymentCase);
@@ -489,6 +507,7 @@ function PaymentCasesTable({
                   <small>{settled ? `Paid${paymentSummary ? ` · ${paymentSummary}` : ''}` : paymentCase.receivable?.payment_status.replaceAll('_', ' ') ?? '—'}</small>
                 </td>
                 <td>{formatDate(paymentCase.receivable?.due_date)}<small>{latenessLabel(paymentCase)}</small></td>
+                <td><JourneyState paymentCase={paymentCase} /></td>
                 <td><StatusBadge status={status} /><small>{formatDateTime(paymentCase.last_reminder_at)}</small></td>
                 <td><button className="row-open-button" type="button" onClick={() => onOpen(paymentCase.id)} aria-label="Open payment case"><ChevronRight size={16} /></button></td>
               </tr>

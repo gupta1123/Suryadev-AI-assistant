@@ -449,6 +449,8 @@ export type PaymentFollowUpCase = {
   next_action_at?: string | null;
   last_reminder_at?: string | null;
   resolved_at?: string | null;
+  reminder_count?: number;
+  reminder_limit?: number;
   created_at: string;
   updated_at: string;
   customer: {
