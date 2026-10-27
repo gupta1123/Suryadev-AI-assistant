@@ -3,7 +3,7 @@ import { env, sapTmtMaterialIds, isMsg91Configured, isPaymentFollowUpSchedulerCo
 import { getSupabaseServerClient } from '../../lib/supabase.js';
 import { HttpError } from '../../lib/http.js';
 import { SapODataClient, escapeODataString } from '../invoice-delivery/sap-client.js';
-import { SapInvoiceSource, combineSapDateAndTime, sapDateOnly } from '../invoice-delivery/sap-source.js';
+import { SapInvoiceSource, SapPdfUnavailableError, combineSapDateAndTime, sapDateOnly } from '../invoice-delivery/sap-source.js';
 import { persistInvoiceRecord } from '../invoice-delivery/repository.js';
 import { listCustomerSettings } from '../messaging/repository.js';
 import { documentDateBlocker } from '../messaging/document-date-policy.js';
@@ -76,7 +76,11 @@ export async function startManualPaymentJourney(number: string, input: z.infer<t
   if (!await isPaymentReminderTemplateApproved()) throw new HttpError(409, 'The WhatsApp payment-reminder template is not approved for the current sender');
   const rules = await getReminderSettings(true);
   if (rules.dueDays !== input.expectedDueDays) throw new HttpError(409, 'Due-day settings changed. Refresh the eligible list.');
-  const candidate = await new SapInvoiceSource().get(number);
+  const candidate = await new SapInvoiceSource().get(number).catch((error: unknown) => {
+    if (error instanceof SapPdfUnavailableError) throw new HttpError(409, `SAP could not generate the PDF for invoice ${number}, so reminders can't be started for it yet. Ask your SAP team to check this invoice's output. (${error.reason})`);
+    if (error instanceof Error && /^SAP /.test(error.message)) throw new HttpError(409, `SAP did not return invoice ${number}: ${error.message}`);
+    throw error;
+  });
   if (candidate.billingDocumentType !== 'F2' || candidate.isCancelled || candidate.currency !== 'INR' || paymentDueDate(candidate.billingDocumentDate, rules.dueDays) > todayInIndia()) throw new HttpError(409, 'Invoice is cancelled, not due, or not an eligible INR invoice');
   if (input.outstandingAmount > candidate.totalGrossAmount) throw new HttpError(400, 'Outstanding balance cannot exceed the invoice total');
   const materialBlocker = await tmtMaterialBlocker(candidate.items);

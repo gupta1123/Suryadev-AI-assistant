@@ -20,6 +20,14 @@ import {
   SapODataClient,
 } from './sap-client.js';
 
+/** SAP is reachable but cannot render this invoice's PDF (an output/form problem inside SAP). */
+export class SapPdfUnavailableError extends Error {
+  constructor(readonly billingDocument: string, readonly reason: string) {
+    super(`SAP could not generate the PDF for invoice ${billingDocument} (${reason})`);
+    this.name = 'SapPdfUnavailableError';
+  }
+}
+
 export class SapInvoiceSource implements InvoiceSource {
   constructor(private readonly client = new SapODataClient()) {}
 
@@ -100,6 +108,8 @@ export class SapInvoiceSource implements InvoiceSource {
       }),
       this.client.functionImport('API_BILLING_DOCUMENT_SRV', 'GetPDF', {
         BillingDocument: id,
+      }).catch((error: unknown) => {
+        throw new SapPdfUnavailableError(id, error instanceof Error ? error.message.replace(/^SAP read request failed with /, '') : 'unknown error');
       }),
     ]);
 

@@ -103,6 +103,9 @@ export function escapeODataString(value: string): string {
 
 function sapErrorMessage(body: unknown): string {
   if (!isRecord(body)) return 'Unknown SAP error';
+  // Some SAP failures come back as XML, not JSON. Surface its error code, e.g. GETWA_NOT_ASSIGNED.
+  const xmlCode = typeof body.raw === 'string' ? /<code>([^<]{1,80})<\/code>/.exec(body.raw)?.[1] : undefined;
+  if (xmlCode) return xmlCode;
   const error = isRecord(body.error) ? body.error : undefined;
   const message = error && isRecord(error.message) ? error.message.value : undefined;
   return typeof message === 'string' && message ? message : 'Unknown SAP error';
