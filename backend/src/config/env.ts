@@ -66,6 +66,7 @@ const envSchema = z.object({
   WHATSAPP_DEFAULT_TEST_RECIPIENT: z.string().default(''),
   WHATSAPP_TEST_RECIPIENTS: z.string().default(''),
   PAYMENT_FOLLOW_UP_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+  PAYMENT_JOURNEY_MODE: z.enum(['manual', 'legacy_test']).default('manual'),
   PAYMENT_FOLLOW_UP_SEND_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   PAYMENT_TEST_DEPLOYMENT_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   PAYMENT_SIMULATION_AUTO_FOLLOW_UP: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
@@ -254,6 +255,6 @@ export const isPaymentFollowUpSchedulerConfigured = Boolean(
     env.DELIVERY_MODE === 'test' &&
     env.PAYMENT_FOLLOW_UP_ENABLED &&
     env.PAYMENT_RECEIVABLE_SOURCE === 'test_fixture' &&
-    paymentTestRecipients.size > 0 &&
-    (env.PAYMENT_SIMULATION_AUTO_FOLLOW_UP || isPaymentFollowUpTestConfigured),
+    (env.PAYMENT_JOURNEY_MODE === 'manual' || (paymentTestRecipients.size > 0 &&
+    (env.PAYMENT_SIMULATION_AUTO_FOLLOW_UP || isPaymentFollowUpTestConfigured))),
 );

@@ -22,6 +22,7 @@ import {
   type PaymentFollowUpConfig,
   type PaymentTestPreview,
   type PaymentTestRunResult,
+  type EligiblePaymentInvoice,
 } from '../types';
 
 export function PaymentFollowUpsPage({
@@ -45,18 +46,23 @@ export function PaymentFollowUpsPage({
   const [search, setSearch] = useState('');
   const [reminder, setReminder] = useState('');
   const [paymentStatus, setPaymentStatus] = useState('');
-  const [bucket, setBucket] = useState<Bucket>('open');
+  const [bucket, setBucket] = useState<Bucket>('journey');
   const [demoOpen, setDemoOpen] = useState(false);
+  const [eligible, setEligible] = useState<EligiblePaymentInvoice[]>([]);
+  const [eligibleError, setEligibleError] = useState('');
+  const [starting, setStarting] = useState<EligiblePaymentInvoice | null>(null);
 
   const load = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true);
     try {
-      const [nextPaymentConfig, nextCases] = await Promise.all([
+      const [nextPaymentConfig, nextCases, nextEligible] = await Promise.all([
         apiRequest<PaymentFollowUpConfig>('/payment-follow-up/config'),
         apiRequest<PaymentFollowUpCase[]>('/payment-follow-up/cases'),
+        apiRequest<EligiblePaymentInvoice[]>('/payment-follow-up/eligible').then((rows) => { setEligibleError(''); return rows; }).catch((cause) => { setEligibleError(toMessage(cause)); return null; }),
       ]);
       setPaymentConfig(nextPaymentConfig);
       setCases(nextCases);
+      if (nextEligible) setEligible(nextEligible);
       setError('');
     } catch (loadError) {
       setError(toMessage(loadError));
@@ -67,6 +73,10 @@ export function PaymentFollowUpsPage({
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const timer = window.setInterval(() => { if (!document.hidden) void load(true); }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [load]);
 
   const reminderOptions = useMemo(
     () => [...new Set(cases.map(reminderStatus))].sort().map((value) => ({ value, label: humanize(value) })),
@@ -82,12 +92,14 @@ export function PaymentFollowUpsPage({
     && (!paymentStatus || item.receivable?.payment_status === paymentStatus)
     && matchesSearch(search, item.customer?.display_name, item.customer?.sap_customer_number, item.invoice?.sap_billing_document)),
   [cases, reminder, paymentStatus, search]);
-  const bucketCounts = useMemo(() => Object.fromEntries(BUCKETS.map(({ key }) => [key, searched.filter((item) => inBucket(item, key)).length])) as Record<Bucket, number>, [searched]);
+  const eligibleFiltered = useMemo(() => eligible.filter((item) => matchesSearch(search, item.customerName, item.customerNumber, item.invoiceNumber)), [eligible, search]);
+  const bucketCounts: Record<Bucket,number> = { journey: searched.filter((item) => !isSettled(item)).length, paid: searched.filter(isSettled).length, eligible: eligibleFiltered.length };
   const filtered = useMemo(() => searched.filter((item) => inBucket(item, bucket)), [searched, bucket]);
   const totalDue = filtered.reduce((sum, item) => sum + (isSettled(item) ? 0 : Number(item.receivable?.outstanding_amount ?? 0)), 0);
   const dueCurrency = filtered.find((item) => item.receivable)?.receivable?.currency ?? 'INR';
   const filtersActive = Boolean(search || reminder || paymentStatus);
   const pagination = usePagination(filtered, 'payment-cases', `${search}|${reminder}|${paymentStatus}|${bucket}`);
+  const eligiblePagination = usePagination(eligibleFiltered, 'payment-eligible', search);
 
   function clearFilters() {
     setSearch('');
@@ -98,7 +110,7 @@ export function PaymentFollowUpsPage({
   return (
     <AppShell
       route={route}
-      eyebrow="Unpaid invoices and their reminders"
+      eyebrow="Review eligible invoices, start journeys, and record payments"
       title="Payment followup"
       onNavigate={onNavigate}
       user={user}
@@ -109,7 +121,7 @@ export function PaymentFollowUpsPage({
           <button className="button button--secondary" type="button" disabled={refreshing} onClick={() => void load(true)}>
             <RefreshCw size={15} className={refreshing ? 'spin' : ''} aria-hidden="true" /> Refresh
           </button>
-          <button
+          {!paymentConfig?.manualJourneys && <button
             className="button button--primary"
             type="button"
             disabled={!paymentConfig?.configured}
@@ -117,22 +129,22 @@ export function PaymentFollowUpsPage({
             onClick={() => setDemoOpen(true)}
           >
             <Send size={15} aria-hidden="true" /> Start demo reminder
-          </button>
+          </button>}
         </>
       )}
     >
       {error && <div className="alert alert--error">{error}</div>}
 
       <section className="list-section">
-        <div className="seg-tabs" role="tablist" aria-label="How late">
+        <div className="seg-tabs" role="tablist" aria-label="Payment journey">
           {BUCKETS.map(({ key, label }) => (
             <button key={key} role="tab" aria-selected={bucket === key} className={bucket === key ? 'seg-tab seg-tab--active' : 'seg-tab'} type="button" onClick={() => setBucket(key)}>
-              {key !== 'open' && key !== 'paid' && <i className={`seg-tab__dot seg-tab__dot--age-${key}`} />}
               {label}<span>{bucketCounts[key]}</span>
             </button>
           ))}
         </div>
-        {!loading && totalDue > 0 && (
+        <p className="list-summary">Eligibility uses the invoice date + {paymentConfig?.dueDays ?? 3} days, enabled customers and approved materials. Payment is confirmed by your team, not verified from SAP. No reminders start until you choose Start journey.</p>
+        {!loading && bucket !== 'eligible' && totalDue > 0 && (
           <p className="list-summary"><strong>{formatCurrency(totalDue, dueCurrency)}</strong> still to pay across {filtered.filter((item) => !isSettled(item)).length} invoices</p>
         )}
         <FilterBar
@@ -142,10 +154,23 @@ export function PaymentFollowUpsPage({
           active={filtersActive}
           onClear={clearFilters}
         >
-          <FilterSelect label="Reminder" value={reminder} options={reminderOptions} onChange={setReminder} />
-          <FilterSelect label="Payment" value={paymentStatus} options={paymentStatusOptions} onChange={setPaymentStatus} />
+          {bucket !== 'eligible' && <><FilterSelect label="Reminder" value={reminder} options={reminderOptions} onChange={setReminder} />
+          <FilterSelect label="Payment" value={paymentStatus} options={paymentStatusOptions} onChange={setPaymentStatus} /></>}
         </FilterBar>
-        {loading ? <div className="table-skeleton"><span /><span /><span /></div> : cases.length > 0 && filtered.length === 0 ? (
+        {bucket === 'eligible' ? <>
+          {eligibleError && <div className="alert alert--error" role="alert">Eligible invoices could not be refreshed: {eligibleError}. Starting a journey is disabled until refresh succeeds.</div>}
+          {loading ? <div className="table-skeleton"><span /><span /></div> : <div className="table-scroll"><table>
+            <thead><tr><th>Customer</th><th>Invoice</th><th>Invoice amount</th><th>Calculated due date</th><th>Payment status</th><th>Action</th></tr></thead>
+            <tbody>{eligiblePagination.pageRows.map((item) => <tr key={item.invoiceNumber}>
+              <td><strong>{item.customerName}</strong><small>{item.customerNumber}</small></td>
+              <td><strong>{item.invoiceNumber}</strong><small>{formatDate(item.invoiceDate)}</small></td>
+              <td>{formatCurrency(item.amount,item.currency)}</td><td>{formatDate(item.dueDate)}<small>Invoice date + {item.dueDays} days</small></td>
+              <td>Not verified<small>Confirm pending balance before starting</small></td>
+              <td><button className="button button--secondary" type="button" disabled={Boolean(eligibleError) || refreshing || !paymentConfig?.manualJourneys || !paymentConfig.sendEnabled} onClick={() => setStarting(item)}>Start journey</button></td>
+            </tr>)}</tbody>
+          </table>{eligibleFiltered.length === 0 && <div className="empty-table"><strong>No eligible invoices</strong><p>Invoices appear here when due, provided their customer and all materials are enabled and no journey already exists.</p></div>}</div>}
+          <PaginationControls page={eligiblePagination.page} pageCount={eligiblePagination.pageCount} pageSize={eligiblePagination.pageSize} total={eligiblePagination.total} noun="invoices" disabled={refreshing} onPageChange={eligiblePagination.setPage} onPageSizeChange={eligiblePagination.setPageSize} />
+        </> : loading ? <div className="table-skeleton"><span /><span /><span /></div> : cases.length > 0 && filtered.length === 0 ? (
           <div className="empty-table">
             <strong>{filtersActive ? 'Nothing matches your search' : 'Nothing in this group'}</strong>
             <p>{filtersActive ? <>Try a different search or <button className="text-button" type="button" onClick={clearFilters}>clear all filters</button>.</> : 'Pick another tab to see other invoices.'}</p>
@@ -174,19 +199,16 @@ export function PaymentFollowUpsPage({
           onComplete={(result) => { setDemoOpen(false); onNavigate(`/payments/${result.caseId}`); }}
         />
       )}
+      {starting && <StartJourneyModal invoice={starting} onClose={() => setStarting(null)} onStarted={async (caseId) => { setStarting(null); await load(true); onNavigate(`/payments/${caseId}`); }} />}
     </AppShell>
   );
 }
 
-type Bucket = 'open' | 'current' | 'due' | 'late30' | 'late60' | 'late60plus' | 'paid';
+type Bucket = 'journey' | 'eligible' | 'paid';
 
 const BUCKETS: Array<{ key: Bucket; label: string }> = [
-  { key: 'open', label: 'All unpaid' },
-  { key: 'current', label: 'Not yet due' },
-  { key: 'due', label: 'Due today' },
-  { key: 'late30', label: '1–30 days late' },
-  { key: 'late60', label: '31–60 days late' },
-  { key: 'late60plus', label: '60+ days late' },
+  { key: 'journey', label: 'In the journey' },
+  { key: 'eligible', label: 'All eligible' },
   { key: 'paid', label: 'Paid' },
 ];
 
@@ -197,15 +219,33 @@ function isSettled(paymentCase: PaymentFollowUpCase): boolean {
 function inBucket(paymentCase: PaymentFollowUpCase, bucket: Bucket): boolean {
   const settled = isSettled(paymentCase);
   if (bucket === 'paid') return settled;
-  if (settled) return false;
-  const days = paymentCase.receivable?.days_overdue ?? 0;
-  const dueToday = paymentCase.receivable?.aging_bucket === 'due';
-  if (bucket === 'current') return days <= 0 && !dueToday;
-  if (bucket === 'due') return dueToday;
-  if (bucket === 'late30') return days >= 1 && days <= 30;
-  if (bucket === 'late60') return days >= 31 && days <= 60;
-  if (bucket === 'late60plus') return days > 60;
-  return true;
+  return bucket === 'journey' && !settled;
+}
+
+function StartJourneyModal({ invoice, onClose, onStarted }: { invoice: EligiblePaymentInvoice; onClose: () => void; onStarted: (id: number) => Promise<void> }) {
+  const [amount,setAmount] = useState('');
+  const [confirmed,setConfirmed] = useState(false);
+  const [busy,setBusy] = useState(false);
+  const [error,setError] = useState('');
+  const valid = confirmed && Number(amount) > 0 && Number(amount) <= invoice.amount;
+  async function start() {
+    if (!valid || busy) return;
+    setBusy(true); setError('');
+    try {
+      const result = await apiRequest<{ caseId: number }>(`/payment-follow-up/journeys/${encodeURIComponent(invoice.invoiceNumber)}/start`, { method:'POST',body:JSON.stringify({ confirmedUnpaid:true,outstandingAmount:Number(amount),expectedDueDays:invoice.dueDays }) });
+      await onStarted(result.caseId);
+    } catch (cause) { setError(toMessage(cause)); } finally { setBusy(false); }
+  }
+  return <Modal title={`Start journey · ${invoice.invoiceNumber}`} description="This starts real WhatsApp payment reminders. It does not resend the invoice or update SAP." onClose={() => { if (!busy) onClose(); }}>
+    <div className="st-stack">
+      <p><strong>{invoice.customerName}</strong> · {invoice.customerNumber}<br />Reminders go to <span className="mono">{invoice.recipient}</span><br />Calculated due date: {formatDate(invoice.dueDate)} (invoice date + {invoice.dueDays} days).</p>
+      <label className="field"><span>Confirmed unpaid balance ({invoice.currency})</span><input type="number" min="0.01" max={invoice.amount} step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} /><small>Enter the actual amount still owed. Invoice total: {formatCurrency(invoice.amount,invoice.currency)}.</small></label>
+      <label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> I have checked that this balance is unpaid and the recipient is correct.</label>
+      <p className="set-note">The current due-days, reminder intervals and limit are saved for this journey. Later settings changes will not change it. Mark as paid stops future reminders.</p>
+      {error && <div className="alert alert--error" role="alert">{error}</div>}
+      <div className="form-actions"><button className="button button--secondary" disabled={busy} onClick={onClose}>Cancel</button><button className="button button--primary" disabled={!valid || busy} onClick={() => void start()}>{busy ? 'Starting…' : 'Confirm and start journey'}</button></div>
+    </div>
+  </Modal>;
 }
 
 function latenessLabel(paymentCase: PaymentFollowUpCase): string {

@@ -4,6 +4,9 @@ import { z } from 'zod';
 import {
   env,
   isPaymentFollowUpTestConfigured,
+  isPaymentFollowUpSchedulerConfigured,
+  isMsg91Configured,
+  isSapConfigured,
   paymentTestRecipients,
 } from '../../config/env.js';
 import { asyncHandler, HttpError } from '../../lib/http.js';
@@ -25,6 +28,7 @@ import {
 import { persistControlledInvoiceResendAndEnqueue } from '../invoice-delivery/repository.js';
 import { processDeliveryQueue } from '../invoice-delivery/worker.js';
 import { paymentDetailsSchema } from './payment-details.js';
+import { listEligiblePaymentInvoices, startJourneySchema, startManualPaymentJourney } from './manual-journeys.js';
 
 const caseIdSchema = z.coerce.number().int().positive();
 
@@ -39,11 +43,15 @@ paymentFollowUpRouter.get('/config', asyncHandler(async (_request, response) => 
   response.json({
     data: {
       enabled: env.PAYMENT_FOLLOW_UP_ENABLED,
-      sendEnabled: env.PAYMENT_FOLLOW_UP_SEND_ENABLED,
-      controlledTest: true,
-      configured: isPaymentFollowUpTestConfigured,
+      manualJourneys: env.PAYMENT_JOURNEY_MODE === 'manual',
+      dueDays: reminderSettings.dueDays,
+      sendEnabled: env.PAYMENT_FOLLOW_UP_SEND_ENABLED && env.MSG91_SEND_ENABLED,
+      controlledTest: env.PAYMENT_JOURNEY_MODE !== 'manual',
+      configured: env.PAYMENT_JOURNEY_MODE === 'manual'
+        ? isPaymentFollowUpSchedulerConfigured && isMsg91Configured && isSapConfigured
+        : isPaymentFollowUpTestConfigured,
       invoiceSource: 'sap',
-      receivableSource: env.PAYMENT_RECEIVABLE_SOURCE,
+      receivableSource: env.PAYMENT_JOURNEY_MODE === 'manual' ? 'user_confirmed' : env.PAYMENT_RECEIVABLE_SOURCE,
       testCustomer: env.PAYMENT_TEST_CUSTOMER,
       testInvoice: env.PAYMENT_TEST_INVOICE,
       maskedRecipient: [...paymentTestRecipients].map(formatPhone).join(', '),
@@ -88,9 +96,18 @@ paymentFollowUpRouter.get(
 paymentFollowUpRouter.post(
   '/test-run',
   asyncHandler(async (request: AuthenticatedRequest, response) => {
+    if (env.PAYMENT_JOURNEY_MODE === 'manual') throw new HttpError(409, 'Use Start journey on an eligible invoice instead of a demo send.');
     response.status(202).json({ data: await startPaymentDemoRun(request.auth?.userId) });
   }),
 );
+
+paymentFollowUpRouter.get('/eligible', asyncHandler(async (_request, response) => {
+  response.json({ data: await listEligiblePaymentInvoices() });
+}));
+paymentFollowUpRouter.post('/journeys/:invoiceNumber/start', asyncHandler(async (request: AuthenticatedRequest, response) => {
+  const number = z.string().regex(/^[a-zA-Z0-9-]{1,35}$/).parse(request.params.invoiceNumber);
+  response.status(201).json({ data: await startManualPaymentJourney(number, startJourneySchema.parse(request.body), request.auth!.user.username) });
+}));
 
 paymentFollowUpRouter.post(
   '/cases/:caseId/restart',

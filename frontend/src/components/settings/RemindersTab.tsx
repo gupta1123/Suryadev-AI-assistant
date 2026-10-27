@@ -35,7 +35,7 @@ export function RemindersTab({
       <div className="st-intro">
         <div>
           <h2>Payment reminders</h2>
-          <p>After an invoice is sent, customers who haven’t paid get a WhatsApp reminder. Choose when, and how many.</p>
+          <p>Choose when invoices become eligible, then set the reminders sent after a user starts a journey. Changes apply only to new journeys.</p>
         </div>
         <Pill tone={pill.tone}>{pill.label}</Pill>
       </div>
@@ -75,6 +75,7 @@ function ReminderTimingForm({
   const [first, setFirst] = useState(() => splitDuration(config.firstReminderDelaySeconds));
   const [repeat, setRepeat] = useState(() => splitDuration(config.repeatReminderDelaySeconds));
   const [maximum, setMaximum] = useState(String(config.maximumTestReminders));
+  const [dueDays, setDueDays] = useState(String(config.dueDays ?? 3));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -86,11 +87,13 @@ function ReminderTimingForm({
   const repeatProblem = maximumCount > 1 && (!Number.isInteger(repeatSeconds) || repeatSeconds < MIN_DELAY_SECONDS || repeatSeconds > MAX_DELAY_SECONDS)
     ? 'Choose between 10 seconds and 30 days.' : '';
   const maximumProblem = !Number.isInteger(maximumCount) || maximumCount < 1 || maximumCount > 10 ? 'Choose between 1 and 10.' : '';
-  const problem = firstProblem || repeatProblem || maximumProblem;
+  const dueProblem = !Number.isInteger(Number(dueDays)) || Number(dueDays) < 1 || Number(dueDays) > 90 ? 'Choose a whole number from 1 to 90 days.' : '';
+  const problem = firstProblem || repeatProblem || maximumProblem || dueProblem;
   const changed =
     firstSeconds !== config.firstReminderDelaySeconds
     || repeatSeconds !== config.repeatReminderDelaySeconds
-    || maximumCount !== config.maximumTestReminders;
+    || maximumCount !== config.maximumTestReminders
+    || Number(dueDays) !== (config.dueDays ?? 3);
 
   function touch<T>(setter: (value: T) => void) {
     return (value: T) => { setter(value); setError(''); onEdit(); };
@@ -105,6 +108,7 @@ function ReminderTimingForm({
       await apiRequest<ReminderSettings>('/payment-follow-up/settings', {
         method: 'PUT',
         body: JSON.stringify({
+          dueDays: Number(dueDays),
           firstReminderDelaySeconds: firstSeconds,
           repeatReminderDelaySeconds: repeatSeconds,
           maximumReminders: maximumCount,
@@ -122,6 +126,7 @@ function ReminderTimingForm({
     setFirst(splitDuration(config.firstReminderDelaySeconds));
     setRepeat(splitDuration(config.repeatReminderDelaySeconds));
     setMaximum(String(config.maximumTestReminders));
+    setDueDays(String(config.dueDays ?? 3));
     setError('');
   }
 
@@ -134,9 +139,14 @@ function ReminderTimingForm({
 
   return (
     <form onSubmit={(event) => void save(event)} className="st-stack">
-      <Card title="When to remind" description="Set the timing, then check the preview below.">
+      <Card title="Reminder timing" description="Set the due date rule and reminder timing, then check the preview below.">
+        <label className="field">
+          <span>Payment due after</span>
+          <input type="number" min={1} max={90} step={1} value={dueDays} onChange={(event) => touch(setDueDays)(event.target.value)} aria-invalid={Boolean(dueProblem)} />
+          <small className={dueProblem ? 'text-danger' : undefined}>{dueProblem || 'days from invoice date. Applies to journeys started after this setting is saved. Existing journeys keep their original due date. This is a calculated due date, not SAP’s due date.'}</small>
+        </label>
         <div className="st-timing">
-          <DurationField label="First reminder" hint="after the invoice is sent" value={first} onChange={touch(setFirst)} problem={firstProblem} />
+          <DurationField label="First reminder" hint="after the user starts the journey" value={first} onChange={touch(setFirst)} problem={firstProblem} />
           <DurationField label="Then every" hint="after the previous reminder" value={repeat} onChange={touch(setRepeat)} problem={repeatProblem} disabled={maximumCount === 1} />
           <label className="field">
             <span>Send at most</span>
@@ -157,8 +167,8 @@ function ReminderTimingForm({
             <ol className="st-track" aria-label="Reminder schedule">
               <li className="st-track__step st-track__step--start">
                 <span className="st-track__dot" />
-                <strong>Invoice sent</strong>
-                <small>day zero</small>
+                <strong>Start journey</strong>
+                <small>once the invoice is due</small>
               </li>
               {steps.map((step) => (
                 <li key={step.number} className="st-track__step">
@@ -180,7 +190,7 @@ function ReminderTimingForm({
                 <small>when paid</small>
               </li>
             </ol>
-            <p className="st-summary">{reminderSummary(firstSeconds, repeatSeconds, maximumCount)}</p>
+            <p className="st-summary">Invoice date + {dueDays} days → eligible. After Start journey: first reminder in {formatDuration(firstSeconds)}, then every {formatDuration(repeatSeconds)}, up to {maximumCount}. Marking paid stops reminders.</p>
           </>
         )}
       </Card>
@@ -188,7 +198,7 @@ function ReminderTimingForm({
       <div className="st-savebar">
         <div className="st-savebar__status">
           {error ? <LiveNote tone="bad">{error}</LiveNote>
-            : justSaved ? <LiveNote><Check size={14} aria-hidden="true" /> Saved. This applies to the next reminder that gets scheduled.</LiveNote>
+            : justSaved ? <LiveNote><Check size={14} aria-hidden="true" /> Saved for new journeys only. Existing journeys are unchanged.</LiveNote>
               : changed ? <p className="st-dirty">You have unsaved changes.</p>
                 : <p className="st-muted">
                   {config.reminderSettingsSource === 'saved'

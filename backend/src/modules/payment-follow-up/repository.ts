@@ -19,7 +19,8 @@ import {
   withCurrentAging,
 } from './policy.js';
 import { formatPhone } from '../invoice-delivery/policy.js';
-import { auditUserId, getReminderSettings } from './settings.js';
+import { auditUserId, getReminderSettings, journeySettings } from './settings.js';
+import { assertManualJourneyAllowed } from './journey-guard.js';
 import { paymentDetailsForStorage, type PaymentDetails } from './payment-details.js';
 import { documentDateBlocker } from '../messaging/document-date-policy.js';
 
@@ -489,7 +490,7 @@ export async function getPaymentCase(caseId: number): Promise<Record<string, unk
     receivable: receivable ?? null,
     latestJob: jobsWithCopies[0] ?? null,
     jobs: jobsWithCopies,
-    restartable: Boolean(restartRecipient),
+    restartable: Boolean(restartRecipient) && !(receivable && isRecord(receivable.raw_data) && receivable.raw_data.manual_payment_journey === true),
     whatsappNumber: whatsappNumber ? formatPhone(whatsappNumber) : null,
   };
 }
@@ -539,6 +540,9 @@ export async function restartPaymentCase(
   restartedBy?: { id: string; username: string },
 ): Promise<Record<string, unknown>> {
   const current = await getPaymentCase(caseId);
+  if (isRecord(current.receivable) && isRecord(current.receivable.raw_data) && current.receivable.raw_data.manual_payment_journey === true) {
+    throw new HttpError(409, 'A manually confirmed journey cannot be reset to unpaid or restarted as a demo.');
+  }
   if (!current.restartable) {
     throw new HttpError(
       409,
@@ -725,7 +729,9 @@ export async function scheduleNextPaymentReminderFromSentAt(
     .contains('metadata', { payment_test_cycle_id: cycleId });
   if (countError) throw new Error(`Unable to count payment reminders: ${countError.message}`);
   const reminderCount = count ?? 0;
-  const reminderSettings = await getReminderSettings();
+  const { data: cycleBalance, error: cycleError } = await client.from('invoice_receivables').select('raw_data').eq('raw_data->>payment_test_cycle_id', cycleId).single();
+  if (cycleError) throw new Error('Unable to load frozen reminder settings');
+  const reminderSettings = journeySettings(cycleBalance?.raw_data, await getReminderSettings());
   const capped = reminderCount >= reminderSettings.maximumReminders;
   const next = new Date(parsedSentAt + reminderSettings.repeatReminderDelaySeconds * 1000);
   const { error } = await client
@@ -910,7 +916,7 @@ export async function repairStalledPaymentSchedules(now = new Date()): Promise<n
       .maybeSingle();
     const rawData = receivable && isRecord(receivable.raw_data) ? receivable.raw_data : {};
     const cycleId = typeof rawData.payment_test_cycle_id === 'string' ? rawData.payment_test_cycle_id : '';
-    if (!cycleId || !isAllowedPaymentRecipient(String(rawData.approved_recipient ?? ''))) continue;
+    if (!cycleId || (!isAllowedPaymentRecipient(String(rawData.approved_recipient ?? '')) && rawData.manual_payment_journey !== true)) continue;
 
     const { data: job } = await client
       .from('communication_jobs')
@@ -999,7 +1005,7 @@ export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleRe
     throw new Error(`Unable to identify controlled payment receivables: ${eligibleError.message}`);
   }
   const eligibleInvoiceIds = (eligibleReceivables ?? [])
-    .filter((row) => isRecord(row.raw_data) && isAllowedPaymentRecipient(String(row.raw_data.approved_recipient ?? '')))
+    .filter((row) => isRecord(row.raw_data) && (isAllowedPaymentRecipient(String(row.raw_data.approved_recipient ?? '')) || row.raw_data.manual_payment_journey === true))
     .map((row) => Number(row.invoice_id));
   if (eligibleInvoiceIds.length === 0) return { enqueued: false, reason: 'not_due' };
   caseQuery = caseQuery.in('invoice_id', eligibleInvoiceIds);
@@ -1038,8 +1044,9 @@ export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleRe
     throw new Error('Controlled payment cycle is missing from the receivable status');
   }
   const approvedRecipient = String(receivableMetadata.approved_recipient ?? '').replace(/\D/g, '');
+  const manual = receivableMetadata.manual_payment_journey === true;
   const isSimulatedPaymentTest = receivableMetadata.invoice_source === 'fixture';
-  if (!isAllowedPaymentRecipient(approvedRecipient)) {
+  if (!manual && !isAllowedPaymentRecipient(approvedRecipient)) {
     throw new Error('Controlled payment schedule refused a case outside the approved test boundary');
   }
   await client.from('audit_logs').insert({
@@ -1065,13 +1072,24 @@ export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleRe
 
   const caseId = Number(paymentCase.id);
   const reminderCount = await countPaymentReminders(client, caseId, cycleId);
-  const reminderSettings = await getReminderSettings();
+  const reminderSettings = journeySettings(receivable.raw_data, await getReminderSettings());
   if (reminderCount >= reminderSettings.maximumReminders) {
     await pausePaymentTestAtCap(client, caseId, reminderCount, reminderSettings.maximumReminders, cycleId);
     return { enqueued: false, reason: 'reminder_cap_reached' };
   }
 
   const scheduledFor = String(paymentCase.next_action_at);
+  if (manual) {
+    try { await assertManualJourneyAllowed(caseId, Number(invoice.id), approvedRecipient, cycleId, outstandingAmount); }
+    catch (error) {
+      // Do not send or consume a reminder slot while blocked. Back off so a
+      // transient SAP outage / disabled customer cannot starve other cases.
+      const paused = await client.from('payment_follow_up_cases').update({ next_action_at:new Date(Date.now()+Math.max(60_000,reminderSettings.repeatReminderDelaySeconds*1000)).toISOString() })
+        .eq('id',caseId).eq('status','active').eq('next_action_at',scheduledFor);
+      if (paused.error) throw new Error('Unable to defer a blocked journey');
+      throw error;
+    }
+  }
   const claimUntil = new Date(now.getTime() + 60_000).toISOString();
   const { data: claimed, error: claimError } = await client
     .from('payment_follow_up_cases')
@@ -1099,7 +1117,7 @@ export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleRe
     if (contactError || !contact) {
       throw new Error(`Approved SAP customer contact is unavailable: ${contactError?.message ?? 'Contact not found'}`);
     }
-    assertAllowedPaymentRecipient(String(contact.normalized_value));
+    if (!manual) assertAllowedPaymentRecipient(String(contact.normalized_value));
 
     const configuration = await ensurePaymentConfiguration(client);
 
@@ -1149,9 +1167,10 @@ export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleRe
         max_attempts: 3,
         idempotency_key: idempotencyKey,
         metadata: {
+          manual_payment_journey: manual,
           controlled_test: true,
           invoice_source: isSimulatedPaymentTest ? 'fixture' : 'sap_qas',
-          receivable_source: 'test_fixture',
+          receivable_source: manual ? 'user_confirmed' : 'test_fixture',
           actual_recipient: approvedRecipient,
           masked_recipient: formatPhone(approvedRecipient),
           due_date: receivable.due_date,
@@ -1216,13 +1235,13 @@ export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleRe
 
 function assertLocalPaymentSchedulerBoundary(): void {
   if (
-    paymentTestRecipients.size === 0 ||
+    (paymentTestRecipients.size === 0 && env.PAYMENT_JOURNEY_MODE !== 'manual') ||
     (env.NODE_ENV === 'production' && !env.PAYMENT_TEST_DEPLOYMENT_ENABLED) ||
     env.DELIVERY_MODE !== 'test' ||
     !env.PAYMENT_FOLLOW_UP_ENABLED ||
     !env.PAYMENT_FOLLOW_UP_SEND_ENABLED ||
     env.PAYMENT_RECEIVABLE_SOURCE !== 'test_fixture' ||
-    (!env.PAYMENT_SIMULATION_AUTO_FOLLOW_UP && !isPaymentFollowUpTestConfigured)
+    (env.PAYMENT_JOURNEY_MODE !== 'manual' && !env.PAYMENT_SIMULATION_AUTO_FOLLOW_UP && !isPaymentFollowUpTestConfigured)
   ) {
     throw new Error('Scheduled payment reminders are disabled outside the controlled payment test');
   }

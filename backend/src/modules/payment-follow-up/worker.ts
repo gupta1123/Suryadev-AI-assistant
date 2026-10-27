@@ -19,6 +19,7 @@ import {
 import { assertAllowedPaymentRecipient } from './policy.js';
 import { assertPaymentRecipientApproved } from '../messaging/guard.js';
 import { assertInvoiceTmtAllowed } from '../messaging/tmt-materials.js';
+import { assertManualJourneyAllowed } from './journey-guard.js';
 import {
   isPaymentCaseResolved,
   markPaymentReminderAwaitingSent,
@@ -73,8 +74,15 @@ async function processClaimedPaymentJob(
   }
   const context = await getDeliveryJobContext(job);
   const recipient = digitsOnly(String(context.metadata.actual_recipient ?? ''));
-  assertAllowedPaymentRecipient(recipient);
+  const manual = context.metadata.manual_payment_journey === true;
+  if (!manual) assertAllowedPaymentRecipient(recipient);
   const assertApproved = async () => {
+    if (manual) {
+      if (!context.payment_follow_up_case_id) throw new Error('Manual reminder has no journey');
+      await assertManualJourneyAllowed(context.payment_follow_up_case_id, context.invoice.id, recipient,
+        String(context.metadata.payment_test_cycle_id ?? ''), Number(context.metadata.outstanding_amount));
+      return;
+    }
     await assertPaymentRecipientApproved(context.customer.sap_customer_number, recipient, {
       documentDate: context.invoice.billing_document_date,
       documentCreatedAt: context.invoice.creation_datetime,

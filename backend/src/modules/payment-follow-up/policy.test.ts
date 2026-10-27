@@ -48,6 +48,10 @@ describe('payment follow-up safety policy', () => {
     assert.equal(paymentDueDate('2026-09-29'), '2026-10-02');
     assert.equal(paymentDueDate('2026-12-30'), '2027-01-02');
     assert.throws(() => paymentDueDate('not-a-date'), /Invalid invoice date/);
+    assert.equal(paymentDueDate('2026-10-24',5),'2026-10-29');
+    assert.equal(paymentDueDate('2028-02-28',1),'2028-02-29');
+    assert.throws(()=>paymentDueDate('2026-02-30',3),/Invalid invoice date/);
+    assert.throws(()=>paymentDueDate('2026-10-24',0),/Due days/);
   });
 
   it('recalculates days late from the due date instead of the stored value', () => {

@@ -126,6 +126,13 @@ export async function processMarketingCopyQueue(): Promise<void> {
               documentCreatedAt: sourceContext.invoice.creation_datetime,
             });
             await assertInvoiceTmtAllowed(sourceContext.invoice.id);
+            if (sourceContext.job_type === 'payment_reminder' && sourceContext.payment_follow_up_case_id) {
+              const state = await client.from('payment_follow_up_cases').select('status,resolved_at')
+                .eq('id',sourceContext.payment_follow_up_case_id).single();
+              if (state.error || !state.data || state.data.resolved_at || ['resolved','closed'].includes(state.data.status)) {
+                throw new MessagingRefusal('Payment journey is closed or marked paid; manager reminder copy is blocked');
+              }
+            }
             dispatched = true;
           },
         );

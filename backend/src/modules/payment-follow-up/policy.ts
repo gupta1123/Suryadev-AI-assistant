@@ -41,10 +41,11 @@ export function todayInIndia(now = new Date()): string {
 
 export const PAYMENT_TERMS_DAYS = 3;
 
-export function paymentDueDate(invoiceDate: string): string {
+export function paymentDueDate(invoiceDate: string, dueDays = PAYMENT_TERMS_DAYS): string {
+  if (!Number.isInteger(dueDays) || dueDays < 1 || dueDays > 90) throw new Error('Due days must be a whole number from 1 to 90');
   const invoiceDay = Date.parse(`${invoiceDate}T00:00:00Z`);
-  if (!Number.isFinite(invoiceDay)) throw new Error(`Invalid invoice date: ${invoiceDate}`);
-  return new Date(invoiceDay + PAYMENT_TERMS_DAYS * 86_400_000).toISOString().slice(0, 10);
+  if (!Number.isFinite(invoiceDay) || new Date(invoiceDay).toISOString().slice(0, 10) !== invoiceDate) throw new Error(`Invalid invoice date: ${invoiceDate}`);
+  return new Date(invoiceDay + dueDays * 86_400_000).toISOString().slice(0, 10);
 }
 
 // Aging depends on today's date, so it is derived whenever a receivable is read

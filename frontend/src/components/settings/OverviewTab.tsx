@@ -171,7 +171,9 @@ export function OverviewTab({
             icon={BadgeIndianRupee}
             name="Payment reminders"
             detail={paymentConfig
-              ? reminderSummary(paymentConfig.firstReminderDelaySeconds, paymentConfig.repeatReminderDelaySeconds, paymentConfig.maximumTestReminders)
+              ? paymentConfig.manualJourneys
+                ? `Invoice date + ${paymentConfig.dueDays} days → eligible. After Start journey: first reminder in ${formatDuration(paymentConfig.firstReminderDelaySeconds)}, then every ${formatDuration(paymentConfig.repeatReminderDelaySeconds)}, up to ${paymentConfig.maximumTestReminders}.`
+                : reminderSummary(paymentConfig.firstReminderDelaySeconds, paymentConfig.repeatReminderDelaySeconds, paymentConfig.maximumTestReminders)
               : 'Sent after an invoice goes out.'}
             state={paymentState(paymentConfig)}
             actionLabel="Change timing"

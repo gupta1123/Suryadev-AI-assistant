@@ -57,7 +57,7 @@ export async function runPaymentFollowUpSchedule(): Promise<void> {
 
 async function initializeScheduler(): Promise<void> {
   try {
-    if (!env.PAYMENT_SIMULATION_AUTO_FOLLOW_UP) {
+    if (env.PAYMENT_JOURNEY_MODE !== 'manual' && !env.PAYMENT_SIMULATION_AUTO_FOLLOW_UP) {
       await preparePaymentTestSchedule();
     }
     const reminderSettings = await getReminderSettings();

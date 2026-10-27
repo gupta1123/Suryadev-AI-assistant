@@ -26,7 +26,7 @@ export async function handOffSentInvoiceToPaymentSchedule(
     if (
       !cycleId ||
       !context.payment_follow_up_case_id ||
-      !isAllowedPaymentRecipient(recipient)
+      (!isAllowedPaymentRecipient(recipient) && context.metadata.manual_payment_journey !== true)
     ) {
       return;
     }
@@ -38,6 +38,9 @@ export async function handOffSentInvoiceToPaymentSchedule(
     );
     return;
   }
+
+  // Discovery and invoice delivery must never opt a customer into reminders.
+  if (env.PAYMENT_JOURNEY_MODE === 'manual') return;
 
   const isManualTestResend =
     context.job_type === 'manual_resend' &&

@@ -345,12 +345,14 @@ export type HelpRequestPage = CursorPage<HelpRequest> & {
 };
 
 export type PaymentFollowUpConfig = {
+  manualJourneys: boolean;
+  dueDays: number;
   enabled: boolean;
   sendEnabled: boolean;
   controlledTest: boolean;
   configured: boolean;
   invoiceSource: 'sap';
-  receivableSource: 'test_fixture' | 'sap';
+  receivableSource: 'test_fixture' | 'sap' | 'user_confirmed';
   testCustomer: string;
   testInvoice: string;
   maskedRecipient: string;
@@ -364,6 +366,7 @@ export type PaymentFollowUpConfig = {
 };
 
 export type ReminderSettings = {
+  dueDays: number;
   firstReminderDelaySeconds: number;
   repeatReminderDelaySeconds: number;
   maximumReminders: number;
@@ -472,6 +475,11 @@ export type PaymentFollowUpCase = {
     days_overdue: number;
     last_synced_at: string;
     raw_data?: {
+      manual_payment_journey?: boolean;
+      source?: string;
+      confirmed_by?: string;
+      confirmed_at?: string;
+      journey_settings?: ReminderSettings;
       payment_confirmation?: {
         source: string;
         marked_by?: string | null;
@@ -488,6 +496,12 @@ export type PaymentFollowUpCase = {
   jobs?: PaymentReminderJob[];
   restartable?: boolean;
   whatsappNumber?: string | null;
+};
+
+export type EligiblePaymentInvoice = {
+  invoiceNumber: string; customerNumber: string; customerName: string;
+  invoiceDate: string; dueDate: string; dueDays: number; amount: number; currency: string;
+  paymentStatus: 'unverified'; recipient: string;
 };
 
 export type MarketingCopyInfo = {

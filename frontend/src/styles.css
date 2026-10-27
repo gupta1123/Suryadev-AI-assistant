@@ -951,6 +951,10 @@ input[aria-invalid="true"] { border-color: #dc2626; }
 .st-savebar { position: sticky; bottom: 0; z-index: 5; padding: 12px 16px; display: flex; align-items: center; gap: 10px; border: 1px solid var(--st-line); border-radius: 14px; background: rgb(255 255 255 / 94%); backdrop-filter: blur(8px); box-shadow: 0 -6px 18px rgb(26 23 20 / 6%); }
 .st-savebar__status { margin-right: auto; min-width: 0; }
 .st-savebar__status p { margin: 0; font-size: .78rem; }
+@media (max-width: 820px) {
+  /* Keep Settings actions above the fixed mobile navigation. */
+  .st-savebar { bottom: 82px; }
+}
 .st-dirty { color: #b45309; font-weight: 650; }
 
 /* Connections */

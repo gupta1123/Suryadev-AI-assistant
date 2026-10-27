@@ -68,6 +68,41 @@ the backend environment. Supabase Auth is not used by this single-admin build.
 
 ## Invoice-delivery workflow
 
+### Manual payment journeys
+
+Apply `supabase/migrations/20261027070417_manual_payment_journeys.sql` **before**
+deploying the updated backend, then release the frontend. The migration only adds
+a service-role-only, security-invoker transaction function; it starts no journeys
+and sends no messages. Existing data, due dates and pending schedules are retained.
+
+`PAYMENT_JOURNEY_MODE=manual` is the new default. Delivery of an invoice does not
+automatically start a payment journey. Payment followup has **In the journey**,
+**All eligible**, and **Paid** tabs. Eligibility reads live SAP F2 invoices and
+checks enabled customers, the 20 October 2026 cutoff, customer enablement time,
+all material lines, and invoice date + configured `dueDays` (default 3, range 1–90).
+Invoices already belonging to a journey, cancelled invoices and closed balances
+are excluded. Discovery is read-only and payment status is explicitly unverified.
+
+Start journey requires the authenticated administrator to confirm the exact SAP
+recipient and enter the actual outstanding amount. A transaction prevents duplicate
+journeys, rechecks saved approvals and materials, and stores a frozen due date,
+reminder intervals and reminder cap. Settings changes affect only new journeys;
+legacy receivables get their prior timing frozen before defaults are changed.
+No SAP payment status is inferred or written. Mark as paid records a dashboard
+confirmation, cancels queued reminders, and closes the journey. An already handed-off
+WhatsApp request cannot be recalled.
+
+Manual journeys may target the customer's exact, freshly verified approved SAP
+phone without the old payment-test number allowlist. Legacy demo jobs remain under
+their old restrictions. Both customer and manager reminder dispatch recheck payment
+closure; customer dispatch additionally checks the frozen journey, current SAP
+invoice/cancellation and phone, customer switch, material switches and contact status.
+Global sending switches and the explicitly approved SAP host still apply. To stop
+all payment sending, keep `PAYMENT_FOLLOW_UP_SEND_ENABLED=false`.
+
+Local tests (`npm test`) use mocked HTTP and an isolated in-memory Postgres engine.
+They do not use SAP, Supabase or MSG91 credentials or send real WhatsApp messages.
+
 In fixture mode, the backend reads `backend/fixtures/sap/*.json`. Each fixture
 preserves the OData envelope and field names expected from the Billing Document
 and Business Partner APIs, including a base64 `GetPDF` response.

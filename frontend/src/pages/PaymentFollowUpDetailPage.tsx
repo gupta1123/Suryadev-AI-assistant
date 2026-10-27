@@ -348,7 +348,7 @@ export function PaymentFollowUpDetailPage({
                   <div><dt>WhatsApp</dt><dd className="mono">{paymentCase.whatsappNumber ?? '—'}</dd></div>
                   <div><dt>Invoice</dt><dd>{invoiceNumber ?? '—'}</dd></div>
                   <div><dt>Issued</dt><dd>{formatDate(paymentCase.invoice?.billing_document_date)}</dd></div>
-                  <div><dt>Due</dt><dd>{formatDate(dueDate)}</dd></div>
+                  <div><dt>Calculated due date</dt><dd>{formatDate(dueDate)}</dd><small>{receivable?.raw_data?.journey_settings ? `Invoice date + ${receivable.raw_data.journey_settings.dueDays} days · frozen at start` : 'Existing journey due date'}</small></div>
                 </dl>
                 <details className="ds-tech pf-tech">
                   <summary>Technical details</summary>
@@ -356,7 +356,8 @@ export function PaymentFollowUpDetailPage({
                     <div><dt>Case reference</dt><dd>#{paymentCase.id}</dd></div>
                     <div><dt>Follow-up status</dt><dd>{humanize(paymentCase.status)}</dd></div>
                     <div><dt>Last reminder</dt><dd>{formatDateTime(lastReminderAt)}</dd></div>
-                    <div><dt>Last synced from SAP</dt><dd>{formatDateTime(receivable?.last_synced_at)}</dd></div>
+                    <div><dt>Payment data source</dt><dd>{receivable?.raw_data?.manual_payment_journey ? 'Confirmed by your team — not SAP payment verification' : 'Controlled test balance — not SAP payment verification'}</dd></div>
+                    <div><dt>Payment record updated</dt><dd>{formatDateTime(receivable?.last_synced_at)}</dd></div>
                   </dl>
                 </details>
               </section>
@@ -422,7 +423,7 @@ export function PaymentFollowUpDetailPage({
       {confirmingPaid && paymentCase && (
         <Modal
           title="Mark this invoice as paid?"
-          description="Reminders for this invoice stop right away. Only do this once the payment has been received."
+          description="Queued reminders for this invoice are cancelled and no further reminders are sent. A reminder already handed to WhatsApp cannot be recalled. Only do this once the payment has been received."
           onClose={() => { if (!markingPaid) setConfirmingPaid(false); }}
         >
           <dl className="pf-recap">
