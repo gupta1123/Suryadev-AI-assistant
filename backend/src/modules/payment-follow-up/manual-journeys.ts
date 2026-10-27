@@ -97,3 +97,53 @@ export async function startManualPaymentJourney(number: string, input: z.infer<t
   if (error) throw new HttpError(error.code === 'PGRST202' ? 503 : 409, error.code === 'PGRST202' ? 'The manual payment journey SQL migration must be applied before starting journeys.' : error.message);
   return { caseId: Number(data) };
 }
+
+export const sendNowSchema = z.object({
+  caseIds: z.array(z.number().int().positive()).min(1).max(100),
+}).strict();
+
+/**
+ * Brings the next scheduled reminder of started journeys forward to now. It never sends
+ * directly: the scheduler still queues each reminder, so every send-time guard, the reminder
+ * cap and the paid/stopped checks apply exactly as for a scheduled reminder.
+ */
+export async function sendManualRemindersNow(caseIds: number[], username: string) {
+  if (env.PAYMENT_JOURNEY_MODE !== 'manual' || !isPaymentFollowUpSchedulerConfigured || !isMsg91Configured || !env.PAYMENT_FOLLOW_UP_ENABLED || !env.PAYMENT_FOLLOW_UP_SEND_ENABLED || !env.MSG91_SEND_ENABLED) throw new HttpError(409, 'Manual payment reminder sending is not enabled on the server');
+  const ids = [...new Set(caseIds)];
+  const client = getSupabaseServerClient();
+  const found = await client.from('payment_follow_up_cases').select('id,invoice_id,status,next_action_at').in('id', ids);
+  if (found.error) throw new Error('Unable to read the selected journeys');
+  const cases = new Map((found.data ?? []).map(row => [Number(row.id), row]));
+  const receivables = await client.from('invoice_receivables').select('invoice_id,raw_data')
+    .in('invoice_id', (found.data ?? []).map(row => Number(row.invoice_id)));
+  if (receivables.error) throw new Error('Unable to read the selected journeys');
+  const manual = new Set((receivables.data ?? [])
+    .filter(row => (row.raw_data as { manual_payment_journey?: unknown } | null)?.manual_payment_journey === true)
+    .map(row => Number(row.invoice_id)));
+  const queued: number[] = [];
+  const skipped: Array<{ caseId: number; reason: string }> = [];
+  for (const id of ids) {
+    const row = cases.get(id);
+    const nextAt = row?.next_action_at ? Date.parse(String(row.next_action_at)) : NaN;
+    const reason = !row ? 'Journey not found'
+      : !manual.has(Number(row.invoice_id)) ? 'Not a manually started journey'
+      : row.status !== 'active' ? 'Journey is stopped or paid'
+      : Number.isNaN(nextAt) ? 'A reminder is already on its way'
+      : nextAt <= Date.now() ? 'Already due — it will send shortly'
+      : '';
+    if (reason) { skipped.push({ caseId: id, reason }); continue; }
+    const now = new Date().toISOString();
+    // The conditions repeat here so a double click, or a journey paid in the meantime, changes nothing.
+    const update = await client.from('payment_follow_up_cases').update({ next_action_at: now })
+      .eq('id', id).eq('status', 'active').gt('next_action_at', now).select('id');
+    if (update.error || !update.data?.length) skipped.push({ caseId: id, reason: 'Changed while sending — check it again' });
+    else queued.push(id);
+  }
+  if (queued.length) {
+    await client.from('audit_logs').insert({
+      actor_type: 'user', action: 'manual_payment_reminders_send_now', entity_type: 'payment_follow_up_case',
+      entity_id: queued.join(',').slice(0, 200), after_data: { caseIds: queued }, metadata: { username },
+    });
+  }
+  return { queued, skipped };
+}

@@ -10,10 +10,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { FilterBar, FilterSelect, humanize, matchesSearch } from '../components/FilterBar';
 import { Modal } from '../components/Modal';
+import { SidePanel } from '../components/SidePanel';
+import { formatDuration } from '../components/settings/duration';
 import { PaginationControls, usePagination } from '../components/PaginationControls';
 import { StatusBadge } from '../components/StatusBadge';
 import { apiRequest } from '../lib/api';
-import { formatCurrency, formatDate, formatDateTime, toMessage } from '../lib/format';
+import { formatCurrency, formatDate, formatDateTime, formatPhone, formatRelative, toMessage } from '../lib/format';
 import {
   relationOne,
   type AdminUser,
@@ -50,7 +52,10 @@ export function PaymentFollowUpsPage({
   const [demoOpen, setDemoOpen] = useState(false);
   const [eligible, setEligible] = useState<EligiblePaymentInvoice[]>([]);
   const [eligibleError, setEligibleError] = useState('');
-  const [starting, setStarting] = useState<EligiblePaymentInvoice | null>(null);
+  const [starting, setStarting] = useState<EligiblePaymentInvoice[] | null>(null);
+  const [sendingNow, setSendingNow] = useState<PaymentFollowUpCase[] | null>(null);
+  const [pickedInvoices, setPickedInvoices] = useState<Set<string>>(new Set());
+  const [pickedCases, setPickedCases] = useState<Set<number>>(new Set());
 
   const load = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true);
@@ -100,6 +105,12 @@ export function PaymentFollowUpsPage({
   const filtersActive = Boolean(search || reminder || paymentStatus);
   const pagination = usePagination(filtered, 'payment-cases', `${search}|${reminder}|${paymentStatus}|${bucket}`);
   const eligiblePagination = usePagination(eligibleFiltered, 'payment-eligible', search);
+  const canStart = !eligibleError && !refreshing && Boolean(paymentConfig?.manualJourneys && paymentConfig.sendEnabled);
+  const chosenInvoices = eligible.filter((item) => pickedInvoices.has(item.invoiceNumber));
+  const sendable = (item: PaymentFollowUpCase) => !isSettled(item) && item.status === 'active' && Boolean(item.next_action_at) && Date.parse(String(item.next_action_at)) > Date.now();
+  const chosenCases = cases.filter((item) => pickedCases.has(item.id) && sendable(item));
+  const sendableIds = filtered.filter(sendable).map((item) => item.id);
+  const toggle = <T,>(set: Set<T>, value: T): Set<T> => { const next = new Set(set); if (!next.delete(value)) next.add(value); return next; };
 
   function clearFilters() {
     setSearch('');
@@ -158,15 +169,27 @@ export function PaymentFollowUpsPage({
           <FilterSelect label="Payment" value={paymentStatus} options={paymentStatusOptions} onChange={setPaymentStatus} /></>}
         </FilterBar>
         {bucket === 'eligible' ? <>
+          {chosenInvoices.length > 0 && <div className="bulk-bar" role="region" aria-label="Selected invoices">
+            <strong>{chosenInvoices.length} selected</strong><span>{formatCurrency(chosenInvoices.reduce((sum, item) => sum + item.amount, 0), chosenInvoices[0]!.currency)}</span>
+            <div className="bulk-bar__actions">
+              <button className="button button--secondary" type="button" onClick={() => setPickedInvoices(new Set())}>Clear</button>
+              <button className="button button--primary" type="button" disabled={!canStart} onClick={() => setStarting(chosenInvoices)}>Start {chosenInvoices.length} {chosenInvoices.length === 1 ? 'journey' : 'journeys'}</button>
+            </div>
+          </div>}
           {eligibleError && <div className="alert alert--error" role="alert">Eligible invoices could not be refreshed: {eligibleError}. Starting a journey is disabled until refresh succeeds.</div>}
           {loading ? <div className="table-skeleton"><span /><span /></div> : <div className="table-scroll"><table>
-            <thead><tr><th>Customer</th><th>Invoice</th><th>Invoice amount</th><th>Calculated due date</th><th>Payment status</th><th>Action</th></tr></thead>
+            <thead><tr>
+              <th className="select-cell"><input type="checkbox" aria-label="Select all eligible invoices" disabled={!canStart || eligibleFiltered.length === 0}
+                checked={eligibleFiltered.length > 0 && eligibleFiltered.every((item) => pickedInvoices.has(item.invoiceNumber))}
+                onChange={(event) => setPickedInvoices(event.target.checked ? new Set(eligibleFiltered.map((item) => item.invoiceNumber)) : new Set())} /></th>
+              <th>Customer</th><th>Invoice</th><th>Invoice amount</th><th>Calculated due date</th><th>Action</th></tr></thead>
             <tbody>{eligiblePagination.pageRows.map((item) => <tr key={item.invoiceNumber}>
+              <td className="select-cell"><input type="checkbox" aria-label={`Select invoice ${item.invoiceNumber}`} disabled={!canStart}
+                checked={pickedInvoices.has(item.invoiceNumber)} onChange={() => setPickedInvoices((current) => toggle(current, item.invoiceNumber))} /></td>
               <td><strong>{item.customerName}</strong><small>{item.customerNumber}</small></td>
               <td><strong>{item.invoiceNumber}</strong><small>{formatDate(item.invoiceDate)}</small></td>
               <td>{formatCurrency(item.amount,item.currency)}</td><td>{formatDate(item.dueDate)}<small>Invoice date + {item.dueDays} days</small></td>
-              <td>Not verified<small>Confirm pending balance before starting</small></td>
-              <td><button className="button button--secondary" type="button" disabled={Boolean(eligibleError) || refreshing || !paymentConfig?.manualJourneys || !paymentConfig.sendEnabled} onClick={() => setStarting(item)}>Start journey</button></td>
+              <td><button className="button button--secondary" type="button" disabled={!canStart} onClick={() => setStarting([item])}>Start journey</button></td>
             </tr>)}</tbody>
           </table>{eligibleFiltered.length === 0 && <div className="empty-table"><strong>No eligible invoices</strong><p>Invoices appear here when due, provided their customer and all materials are enabled and no journey already exists.</p></div>}</div>}
           <PaginationControls page={eligiblePagination.page} pageCount={eligiblePagination.pageCount} pageSize={eligiblePagination.pageSize} total={eligiblePagination.total} noun="invoices" disabled={refreshing} onPageChange={eligiblePagination.setPage} onPageSizeChange={eligiblePagination.setPageSize} />
@@ -177,7 +200,20 @@ export function PaymentFollowUpsPage({
           </div>
         ) : (
           <>
-            <PaymentCasesTable cases={pagination.pageRows} onOpen={(caseId) => onNavigate(`/payments/${caseId}`)} />
+            {bucket === 'journey' && chosenCases.length > 0 && <div className="bulk-bar" role="region" aria-label="Selected journeys">
+              <strong>{chosenCases.length} selected</strong><span>{formatCurrency(chosenCases.reduce((sum, item) => sum + Number(item.receivable?.outstanding_amount ?? 0), 0), chosenCases[0]?.receivable?.currency ?? 'INR')}</span>
+              <div className="bulk-bar__actions">
+                <button className="button button--secondary" type="button" onClick={() => setPickedCases(new Set())}>Clear</button>
+                <button className="button button--primary" type="button" disabled={!paymentConfig?.manualJourneys || !paymentConfig.sendEnabled} onClick={() => setSendingNow(chosenCases)}><Send size={15} aria-hidden="true" /> Send {chosenCases.length} now</button>
+              </div>
+            </div>}
+            <PaymentCasesTable cases={pagination.pageRows} onOpen={(caseId) => onNavigate(`/payments/${caseId}`)}
+              selection={bucket === 'journey' ? {
+                picked: pickedCases, canPick: sendable,
+                onToggle: (id) => setPickedCases((current) => toggle(current, id)),
+                allPicked: sendableIds.length > 0 && sendableIds.every((id) => pickedCases.has(id)),
+                onToggleAll: (all) => setPickedCases(all ? new Set(sendableIds) : new Set()),
+              } : undefined} />
             <PaginationControls
               page={pagination.page}
               pageCount={pagination.pageCount}
@@ -199,7 +235,9 @@ export function PaymentFollowUpsPage({
           onComplete={(result) => { setDemoOpen(false); onNavigate(`/payments/${result.caseId}`); }}
         />
       )}
-      {starting && <StartJourneyModal invoice={starting} onClose={() => setStarting(null)} onStarted={async (caseId) => { setStarting(null); await load(true); onNavigate(`/payments/${caseId}`); }} />}
+      {starting && paymentConfig && <StartJourneyPanel invoices={starting} config={paymentConfig} onClose={() => setStarting(null)}
+        onFinished={async (caseId) => { setStarting(null); setPickedInvoices(new Set()); await load(true); if (caseId) onNavigate(`/payments/${caseId}`); }} />}
+      {sendingNow && <SendNowPanel cases={sendingNow} onClose={() => setSendingNow(null)} onFinished={async () => { setSendingNow(null); setPickedCases(new Set()); await load(true); }} />}
     </AppShell>
   );
 }
@@ -222,30 +260,140 @@ function inBucket(paymentCase: PaymentFollowUpCase, bucket: Bucket): boolean {
   return bucket === 'journey' && !settled;
 }
 
-function StartJourneyModal({ invoice, onClose, onStarted }: { invoice: EligiblePaymentInvoice; onClose: () => void; onStarted: (id: number) => Promise<void> }) {
-  const [amount,setAmount] = useState('');
-  const [confirmed,setConfirmed] = useState(false);
-  const [busy,setBusy] = useState(false);
-  const [error,setError] = useState('');
-  const valid = confirmed && Number(amount) > 0 && Number(amount) <= invoice.amount;
-  async function start() {
-    if (!valid || busy) return;
+type RunState = { status: 'waiting' | 'running' | 'started' | 'failed'; message?: string };
+
+function timingLine(config: PaymentFollowUpConfig): string {
+  return `First reminder ${formatDuration(config.firstReminderDelaySeconds)} after you start, then every ${formatDuration(config.repeatReminderDelaySeconds)}, up to ${config.maximumTestReminders}. Marking paid stops them.`;
+}
+
+function StartJourneyPanel({ invoices, config, onClose, onFinished }: {
+  invoices: EligiblePaymentInvoice[];
+  config: PaymentFollowUpConfig;
+  onClose: () => void;
+  onFinished: (caseId?: number) => Promise<void>;
+}) {
+  const single = invoices.length === 1;
+  const first = invoices[0]!;
+  const [amount, setAmount] = useState(String(first.amount));
+  const [busy, setBusy] = useState(false);
+  const [finished, setFinished] = useState(false);
+  const [runs, setRuns] = useState<Record<string, RunState>>({});
+  const [error, setError] = useState('');
+  const total = invoices.reduce((sum, item) => sum + item.amount, 0);
+  const amountValue = Math.round(Number(amount) * 100) / 100;
+  const amountOk = !single || (amountValue > 0 && amountValue <= first.amount);
+  const started = Object.values(runs).filter((run) => run.status === 'started').length;
+  const failed = Object.values(runs).filter((run) => run.status === 'failed').length;
+
+  async function run() {
+    if (!amountOk || busy) return;
+    setBusy(true); setError('');
+    let firstCase: number | undefined;
+    for (const invoice of invoices) {
+      setRuns((current) => ({ ...current, [invoice.invoiceNumber]: { status: 'running' } }));
+      try {
+        const result = await apiRequest<{ caseId: number }>(`/payment-follow-up/journeys/${encodeURIComponent(invoice.invoiceNumber)}/start`, {
+          method: 'POST',
+          body: JSON.stringify({ confirmedUnpaid: true, outstandingAmount: single ? amountValue : invoice.amount, expectedDueDays: invoice.dueDays }),
+        });
+        firstCase ??= result.caseId;
+        setRuns((current) => ({ ...current, [invoice.invoiceNumber]: { status: 'started' } }));
+      } catch (cause) {
+        const message = toMessage(cause);
+        setRuns((current) => ({ ...current, [invoice.invoiceNumber]: { status: 'failed', message } }));
+        if (single) setError(message);
+      }
+    }
+    setBusy(false);
+    if (single && firstCase) { await onFinished(firstCase); return; }
+    if (!single) setFinished(true);
+  }
+
+  return <SidePanel
+    title={single ? 'Start payment reminders' : `Start ${invoices.length} journeys`}
+    subtitle={single ? `${first.customerName} · ${first.invoiceNumber}` : `${formatCurrency(total, first.currency)} across ${invoices.length} invoices`}
+    onClose={() => { if (finished) void onFinished(); else onClose(); }}
+    busy={busy}
+    footer={finished
+      ? <button className="button button--primary" type="button" onClick={() => void onFinished()}>Done</button>
+      : <><button className="button button--secondary" type="button" disabled={busy} onClick={onClose}>Cancel</button>
+        <button className="button button--primary" type="button" disabled={!amountOk || busy} onClick={() => void run()}>
+          {busy ? 'Starting…' : single ? 'Start reminders' : `Start ${invoices.length} journeys`}</button></>}
+  >
+    {single ? <>
+      <dl className="sp-facts">
+        <div><dt>Customer</dt><dd>{first.customerName}<small>{first.customerNumber}</small></dd></div>
+        <div><dt>Sends to</dt><dd className="mono">{formatPhone(first.recipient)}</dd></div>
+        <div><dt>Invoice</dt><dd>{first.invoiceNumber}<small>{formatDate(first.invoiceDate)}</small></dd></div>
+        <div><dt>Calculated due date</dt><dd>{formatDate(first.dueDate)}<small>Invoice date + {first.dueDays} days</small></dd></div>
+      </dl>
+      <label className="field">
+        <span>Amount to remind about ({first.currency})</span>
+        <input type="number" min="0.01" max={first.amount} step="0.01" inputMode="decimal" value={amount} disabled={busy}
+          aria-invalid={!amountOk} onChange={(event) => setAmount(event.target.value)} />
+        <small className={amountOk ? undefined : 'text-danger'}>{amountOk ? `Full invoice amount. Lower it if part has been paid.` : `Enter an amount up to ${formatCurrency(first.amount, first.currency)}.`}</small>
+      </label>
+    </> : <>
+      <div className="sp-total"><span>{invoices.length} invoices, full amounts</span><strong>{formatCurrency(total, first.currency)}</strong></div>
+      <ul className="sp-list">
+        {invoices.map((invoice) => {
+          const state = runs[invoice.invoiceNumber];
+          return <li key={invoice.invoiceNumber}>
+            <span><strong>{invoice.customerName}</strong><small>{invoice.invoiceNumber} · {formatCurrency(invoice.amount, invoice.currency)}</small></span>
+            {state?.status === 'started' ? <span className="sp-state sp-state--ok">Started</span>
+              : state?.status === 'failed' ? <span className="sp-state sp-state--bad">{state.message}</span>
+              : state?.status === 'running' ? <span className="sp-state">Starting…</span> : null}
+          </li>;
+        })}
+      </ul>
+      {finished && <p className="sp-note">{started} started{failed ? `, ${failed} could not start — they stay in All eligible.` : '.'}</p>}
+    </>}
+    {!finished && <p className="sp-note">{timingLine(config)}</p>}
+    {error && <div className="alert alert--error" role="alert">{error}</div>}
+  </SidePanel>;
+}
+
+function SendNowPanel({ cases, onClose, onFinished }: { cases: PaymentFollowUpCase[]; onClose: () => void; onFinished: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState<{ queued: number[]; skipped: Array<{ caseId: number; reason: string }> } | null>(null);
+  const total = cases.reduce((sum, item) => sum + Number(item.receivable?.outstanding_amount ?? 0), 0);
+  const currency = cases[0]?.receivable?.currency ?? 'INR';
+  const skipped = new Map((result?.skipped ?? []).map((item) => [item.caseId, item.reason]));
+
+  async function send() {
     setBusy(true); setError('');
     try {
-      const result = await apiRequest<{ caseId: number }>(`/payment-follow-up/journeys/${encodeURIComponent(invoice.invoiceNumber)}/start`, { method:'POST',body:JSON.stringify({ confirmedUnpaid:true,outstandingAmount:Number(amount),expectedDueDays:invoice.dueDays }) });
-      await onStarted(result.caseId);
+      setResult(await apiRequest<{ queued: number[]; skipped: Array<{ caseId: number; reason: string }> }>('/payment-follow-up/cases/send-now', {
+        method: 'POST', body: JSON.stringify({ caseIds: cases.map((item) => item.id) }),
+      }));
     } catch (cause) { setError(toMessage(cause)); } finally { setBusy(false); }
   }
-  return <Modal title={`Start journey · ${invoice.invoiceNumber}`} description="This starts real WhatsApp payment reminders. It does not resend the invoice or update SAP." onClose={() => { if (!busy) onClose(); }}>
-    <div className="st-stack">
-      <p><strong>{invoice.customerName}</strong> · {invoice.customerNumber}<br />Reminders go to <span className="mono">{invoice.recipient}</span><br />Calculated due date: {formatDate(invoice.dueDate)} (invoice date + {invoice.dueDays} days).</p>
-      <label className="field"><span>Confirmed unpaid balance ({invoice.currency})</span><input type="number" min="0.01" max={invoice.amount} step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} /><small>Enter the actual amount still owed. Invoice total: {formatCurrency(invoice.amount,invoice.currency)}.</small></label>
-      <label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> I have checked that this balance is unpaid and the recipient is correct.</label>
-      <p className="set-note">The current due-days, reminder intervals and limit are saved for this journey. Later settings changes will not change it. Mark as paid stops future reminders.</p>
-      {error && <div className="alert alert--error" role="alert">{error}</div>}
-      <div className="form-actions"><button className="button button--secondary" disabled={busy} onClick={onClose}>Cancel</button><button className="button button--primary" disabled={!valid || busy} onClick={() => void start()}>{busy ? 'Starting…' : 'Confirm and start journey'}</button></div>
-    </div>
-  </Modal>;
+
+  return <SidePanel
+    title={`Send ${cases.length} ${cases.length === 1 ? 'reminder' : 'reminders'} now`}
+    subtitle={`${formatCurrency(total, currency)} still to pay`}
+    onClose={() => { if (result) void onFinished(); else onClose(); }}
+    busy={busy}
+    footer={result
+      ? <button className="button button--primary" type="button" onClick={() => void onFinished()}>Done</button>
+      : <><button className="button button--secondary" type="button" disabled={busy} onClick={onClose}>Cancel</button>
+        <button className="button button--primary" type="button" disabled={busy} onClick={() => void send()}><Send size={15} aria-hidden="true" /> {busy ? 'Sending…' : `Send ${cases.length} now`}</button></>}
+  >
+    <ul className="sp-list">
+      {cases.map((item) => <li key={item.id}>
+        <span><strong>{item.customer?.display_name ?? 'Customer unavailable'}</strong>
+          <small>{item.invoice?.sap_billing_document} · {formatCurrency(Number(item.receivable?.outstanding_amount ?? 0), item.receivable?.currency)}</small></span>
+        {result
+          ? (skipped.has(item.id) ? <span className="sp-state sp-state--bad">{skipped.get(item.id)}</span> : <span className="sp-state sp-state--ok">Queued</span>)
+          : <span className="sp-state">Next {formatRelative(item.next_action_at)}</span>}
+      </li>)}
+    </ul>
+    {result
+      ? <p className="sp-note">{result.queued.length} queued. They go out one after another over the next few minutes.</p>
+      : <p className="sp-note">Reminders go out one after another over the next few minutes. Each one counts toward the reminder limit, and anything marked paid is skipped.</p>}
+    {error && <div className="alert alert--error" role="alert">{error}</div>}
+  </SidePanel>;
 }
 
 function latenessLabel(paymentCase: PaymentFollowUpCase): string {
@@ -260,12 +408,22 @@ function reminderStatus(paymentCase: PaymentFollowUpCase): string {
   return relationOne(paymentCase.latestJob?.messages)?.status ?? paymentCase.latestJob?.status ?? paymentCase.status;
 }
 
+type CaseSelection = {
+  picked: Set<number>;
+  canPick: (item: PaymentFollowUpCase) => boolean;
+  onToggle: (id: number) => void;
+  allPicked: boolean;
+  onToggleAll: (all: boolean) => void;
+};
+
 function PaymentCasesTable({
   cases,
   onOpen,
+  selection,
 }: {
   cases: PaymentFollowUpCase[];
   onOpen: (caseId: number) => void;
+  selection?: CaseSelection | undefined;
 }) {
   if (cases.length === 0) {
     return (
@@ -279,7 +437,9 @@ function PaymentCasesTable({
   return (
     <div className="table-scroll">
       <table>
-        <thead><tr><th>Customer</th><th>Invoice</th><th>Payment</th><th>Due date</th><th>Last reminder</th><th aria-label="Open" /></tr></thead>
+        <thead><tr>
+          {selection && <th className="select-cell"><input type="checkbox" aria-label="Select all journeys that can send now" checked={selection.allPicked} onChange={(event) => selection.onToggleAll(event.target.checked)} /></th>}
+          <th>Customer</th><th>Invoice</th><th>Payment</th><th>Due date</th><th>Last reminder</th><th aria-label="Open" /></tr></thead>
         <tbody>
           {cases.map((paymentCase) => {
             const status = reminderStatus(paymentCase);
@@ -292,6 +452,9 @@ function PaymentCasesTable({
             ].filter(Boolean).join(' · ');
             return (
               <tr key={paymentCase.id}>
+                {selection && <td className="select-cell"><input type="checkbox" aria-label={`Select invoice ${paymentCase.invoice?.sap_billing_document ?? ''}`}
+                  disabled={!selection.canPick(paymentCase)} title={selection.canPick(paymentCase) ? undefined : 'No reminder is waiting to be sent'}
+                  checked={selection.picked.has(paymentCase.id)} onChange={() => selection.onToggle(paymentCase.id)} /></td>}
                 <td><strong>{paymentCase.customer?.display_name ?? 'Customer unavailable'}</strong><small>{paymentCase.customer?.sap_customer_number ?? '—'}</small></td>
                 <td><span className="invoice-number">{paymentCase.invoice?.sap_billing_document ?? '—'}</span><small>{formatDate(paymentCase.invoice?.billing_document_date)}</small></td>
                 <td>

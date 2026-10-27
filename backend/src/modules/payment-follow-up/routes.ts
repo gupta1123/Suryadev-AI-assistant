@@ -28,7 +28,7 @@ import {
 import { persistControlledInvoiceResendAndEnqueue } from '../invoice-delivery/repository.js';
 import { processDeliveryQueue } from '../invoice-delivery/worker.js';
 import { paymentDetailsSchema } from './payment-details.js';
-import { listEligiblePaymentInvoices, startJourneySchema, startManualPaymentJourney } from './manual-journeys.js';
+import { listEligiblePaymentInvoices, sendManualRemindersNow, sendNowSchema, startJourneySchema, startManualPaymentJourney } from './manual-journeys.js';
 
 const caseIdSchema = z.coerce.number().int().positive();
 
@@ -107,6 +107,10 @@ paymentFollowUpRouter.get('/eligible', asyncHandler(async (_request, response) =
 paymentFollowUpRouter.post('/journeys/:invoiceNumber/start', asyncHandler(async (request: AuthenticatedRequest, response) => {
   const number = z.string().regex(/^[a-zA-Z0-9-]{1,35}$/).parse(request.params.invoiceNumber);
   response.status(201).json({ data: await startManualPaymentJourney(number, startJourneySchema.parse(request.body), request.auth!.user.username) });
+}));
+
+paymentFollowUpRouter.post('/cases/send-now', asyncHandler(async (request: AuthenticatedRequest, response) => {
+  response.json({ data: await sendManualRemindersNow(sendNowSchema.parse(request.body).caseIds, request.auth!.user.username) });
 }));
 
 paymentFollowUpRouter.post(
