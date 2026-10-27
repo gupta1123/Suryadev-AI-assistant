@@ -35,7 +35,6 @@ export function RemindersTab({
       <div className="st-intro">
         <div>
           <h2>Payment reminders</h2>
-          <p>Choose when invoices become eligible, then set the reminders sent after a user starts a journey. Changes apply only to new journeys.</p>
         </div>
         <Pill tone={pill.tone}>{pill.label}</Pill>
       </div>
@@ -139,7 +138,7 @@ function ReminderTimingForm({
 
   return (
     <form onSubmit={(event) => void save(event)} className="st-stack">
-      <Card title="Reminder timing" description="Set the due date rule and reminder timing, then check the preview below.">
+      <Card title="Reminder timing">
         <label className="field">
           <span>Payment due after</span>
           <input type="number" min={1} max={90} step={1} value={dueDays} onChange={(event) => touch(setDueDays)(event.target.value)} aria-invalid={Boolean(dueProblem)} />

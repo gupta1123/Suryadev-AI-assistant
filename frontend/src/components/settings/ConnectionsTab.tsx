@@ -52,13 +52,11 @@ export function ConnectionsTab({
 
   const sapTone: Tone = !liveSap ? 'off' : failed ? 'bad' : config.sapPollingReady ? 'ok' : 'warn';
   const sapLabel = !liveSap ? 'Using test data' : failed ? 'Last check failed' : config.sapPollingReady ? 'Connected' : 'Not ready';
-  const approvedCount = templates?.templates.filter((item) => item.approved).length ?? 0;
 
   return (
     <div className="st-stack">
       <Card
         title="SAP"
-        description="Where new invoices and memos come from. The app only reads from SAP — it never changes anything there."
         action={liveSap && (
           <button className="button button--secondary" type="button" disabled={checking || !config.sapPollingReady} onClick={() => void checkNow()}>
             <RefreshCw size={15} className={checking ? 'spin' : ''} aria-hidden="true" /> {checking ? 'Checking…' : 'Check SAP now'}
@@ -95,7 +93,7 @@ export function ConnectionsTab({
         </dl>
       </Card>
 
-      <Card title="WhatsApp" description="The service that delivers messages to your customers.">
+      <Card title="WhatsApp">
         <ul className="st-checklist">
           <CheckRow label="Connection" detail="Your WhatsApp sender is linked." tone={config.msg91Configured ? 'ok' : 'bad'} text={config.msg91Configured ? 'Connected' : 'Not connected'} />
           <CheckRow label="Sending" detail="Whether messages are actually sent, or only prepared." tone={!config.msg91Configured ? 'off' : config.sendEnabled ? 'ok' : 'warn'} text={config.sendEnabled ? 'On' : 'Off'} />
@@ -112,9 +110,6 @@ export function ConnectionsTab({
 
       <Card
         title="Message formats"
-        description={templates
-          ? `${approvedCount} of ${templates.templates.length} approved by WhatsApp. A format that isn’t approved yet is held, then sent automatically once it is.`
-          : 'WhatsApp must approve each format before it can be sent.'}
         action={(
           <button className="button button--secondary st-sm" type="button" disabled={checkingTemplates} onClick={() => void onCheckTemplates()}>
             <RefreshCw size={14} className={checkingTemplates ? 'spin' : ''} aria-hidden="true" /> Check again

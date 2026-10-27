@@ -49,10 +49,8 @@ export function MaterialsTab() {
     finally { setBusy(false); }
   }
   return <div className="st-section">
-    <div className="st-sectionhead"><div><h2>TMT materials</h2><p>Choose which exact SAP material codes may be sent on WhatsApp.</p></div>
+    <div className="st-sectionhead"><div><h2>TMT materials</h2></div>
       <button type="button" className="button button--secondary" disabled={loading || busy} onClick={() => void load(true)}><RefreshCw size={15} /> Refresh from SAP</button></div>
-    <div className="alert alert--info">{data?.note ?? 'New material codes start Off. Customer approval and the 20 October 2026 date cutoff still apply.'}</div>
-    <p className="st-hint">Turning On can release previously skipped or queued documents dated 20 October 2026 or later, only for enabled customers and documents created after customer approval. It does not resend messages already sent. Turning Off blocks the whole document if it contains that material—even if another material is On. Messages already handed to WhatsApp cannot be recalled.</p>
     {notice && <LiveNote>{notice}</LiveNote>}{error && <LiveNote tone="bad">{error}</LiveNote>}
     {data?.directoryError && <div className="alert alert--error">{data.directoryError}</div>}
     {data && data.mode !== 'dashboard' && <LiveNote tone="bad">Dashboard material controls are not active. Changes are locked.</LiveNote>}
