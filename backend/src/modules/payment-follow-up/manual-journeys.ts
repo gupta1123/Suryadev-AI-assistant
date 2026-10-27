@@ -18,6 +18,19 @@ export const startJourneySchema = z.object({
   expectedDueDays: z.number().int().min(1).max(90),
 }).strict();
 
+const DELIVERY_JOB_TYPES = ['invoice_delivery', 'manual_resend'];
+const SENT_MESSAGE_STATUSES = ['accepted', 'sent', 'delivered', 'read'];
+
+/** True when the invoice itself reached the customer: a delivery job finished and its message was accepted. */
+export function wasDeliveredToCustomer(jobs: unknown): boolean {
+  const list = Array.isArray(jobs) ? jobs : jobs ? [jobs] : [];
+  return list.some((job: { job_type?: string; status?: string; messages?: unknown }) => {
+    if (!DELIVERY_JOB_TYPES.includes(String(job.job_type)) || job.status !== 'completed') return false;
+    const messages = Array.isArray(job.messages) ? job.messages : job.messages ? [job.messages] : [];
+    return messages.some((message: { status?: string }) => SENT_MESSAGE_STATUSES.includes(String(message.status)));
+  });
+}
+
 export async function listEligiblePaymentInvoices() {
   const client = getSupabaseServerClient();
   const [settings, rules, materialState, customers] = await Promise.all([
@@ -26,10 +39,10 @@ export async function listEligiblePaymentInvoices() {
   ]);
   if (customers.error || customers.data?.length === 10000) throw new Error('Unable to read customer names');
   const names = new Map((customers.data??[]).map(row=>[row.sap_customer_number,row.display_name]));
-  const existing = new Map<string, {customers: unknown;payment_follow_up_cases: unknown;invoice_receivables: unknown}>();
+  const existing = new Map<string, {customers: unknown;payment_follow_up_cases: unknown;invoice_receivables: unknown;communication_jobs: unknown}>();
   for (let offset=0; ; offset+=500) {
     if (offset>=10000) throw new Error('Existing invoice discovery exceeds its safety limit');
-    const page = await client.from('invoices').select('id,sap_billing_document,customers!invoices_sold_to_customer_id_fkey(display_name),payment_follow_up_cases(id),invoice_receivables(payment_status,outstanding_amount)')
+    const page = await client.from('invoices').select('id,sap_billing_document,customers!invoices_sold_to_customer_id_fkey(display_name),payment_follow_up_cases(id),invoice_receivables(payment_status,outstanding_amount),communication_jobs!communication_jobs_primary_invoice_id_fkey(job_type,status,messages(status))')
       .order('id').range(offset,offset+499);
     if (page.error) throw new Error('Unable to verify the complete existing journey list');
     for (const row of page.data ?? []) existing.set(row.sap_billing_document,row);
@@ -47,6 +60,8 @@ export async function listEligiblePaymentInvoices() {
       for (const header of headers) {
         const number = String(header.BillingDocument);
         const prior = existing.get(number);
+        // Only chase payment for an invoice the customer actually received.
+        if (!prior || !wasDeliveredToCustomer(prior.communication_jobs)) continue;
         const cases = prior?.payment_follow_up_cases;
         const balances = prior?.invoice_receivables as {payment_status:string;outstanding_amount:number} | {payment_status:string;outstanding_amount:number}[] | undefined;
         if (Array.isArray(cases) ? cases.length > 0 : Boolean(cases)) continue;
@@ -74,6 +89,11 @@ export async function listEligiblePaymentInvoices() {
 export async function startManualPaymentJourney(number: string, input: z.infer<typeof startJourneySchema>, username: string) {
   if (env.PAYMENT_JOURNEY_MODE !== 'manual' || !isPaymentFollowUpSchedulerConfigured || !isMsg91Configured || !env.PAYMENT_FOLLOW_UP_ENABLED || !env.PAYMENT_FOLLOW_UP_SEND_ENABLED || !env.MSG91_SEND_ENABLED) throw new HttpError(409, 'Manual payment reminder sending is not enabled on the server');
   if (!await isPaymentReminderTemplateApproved()) throw new HttpError(409, 'The WhatsApp payment-reminder template is not approved for the current sender');
+  const delivery = await getSupabaseServerClient().from('invoices')
+    .select('id,communication_jobs!communication_jobs_primary_invoice_id_fkey(job_type,status,messages(status))')
+    .eq('sap_billing_document', number).maybeSingle();
+  if (delivery.error) throw new Error('Unable to check whether this invoice was delivered');
+  if (!delivery.data || !wasDeliveredToCustomer(delivery.data.communication_jobs)) throw new HttpError(409, `Invoice ${number} has not been delivered to the customer, so payment reminders can't be started for it.`);
   const rules = await getReminderSettings(true);
   if (rules.dueDays !== input.expectedDueDays) throw new HttpError(409, 'Due-day settings changed. Refresh the eligible list.');
   const candidate = await new SapInvoiceSource().get(number).catch((error: unknown) => {

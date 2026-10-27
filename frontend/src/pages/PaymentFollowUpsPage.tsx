@@ -166,7 +166,7 @@ export function PaymentFollowUpsPage({
             </button>
           ))}
         </div>
-        {bucket === 'eligible' && <p className="list-summary">Eligibility uses the invoice date + {paymentConfig?.dueDays ?? 3} days, enabled customers and approved materials. Payment is confirmed by your team, not verified from SAP. No reminders start until you choose Start journey.</p>}
+        {bucket === 'eligible' && <p className="list-summary">Eligibility uses the invoice date + {paymentConfig?.dueDays ?? 3} days, enabled customers, approved materials and an invoice already delivered to the customer. Payment is confirmed by your team, not verified from SAP. No reminders start until you choose Start journey.</p>}
         {!loading && bucket !== 'eligible' && totalDue > 0 && (
           <p className="list-summary"><strong>{formatCurrency(totalDue, dueCurrency)}</strong> still to pay across {filtered.filter((item) => !isSettled(item)).length} invoices</p>
         )}
@@ -203,7 +203,7 @@ export function PaymentFollowUpsPage({
               <td>{formatCurrency(item.amount,item.currency)}</td><td>{formatDate(item.dueDate)}<small>Invoice date + {item.dueDays} days</small></td>
               <td><button className="button button--secondary" type="button" disabled={!canStart} onClick={() => setStarting([item])}>Start journey</button></td>
             </tr>)}</tbody>
-          </table>{eligibleFiltered.length === 0 && <div className="empty-table"><strong>No eligible invoices</strong><p>Invoices appear here when due, provided their customer and all materials are enabled and no journey already exists.</p></div>}</div>}
+          </table>{eligibleFiltered.length === 0 && <div className="empty-table"><strong>No eligible invoices</strong><p>Invoices appear here when due, once delivered to the customer, provided their customer and all materials are enabled and no journey already exists.</p></div>}</div>}
           <PaginationControls page={eligiblePagination.page} pageCount={eligiblePagination.pageCount} pageSize={eligiblePagination.pageSize} total={eligiblePagination.total} noun="invoices" disabled={refreshing} onPageChange={eligiblePagination.setPage} onPageSizeChange={eligiblePagination.setPageSize} />
         </> : loading ? <div className="table-skeleton"><span /><span /><span /></div> : cases.length > 0 && filtered.length === 0 ? (
           <div className="empty-table">

@@ -8,7 +8,7 @@ Object.assign(process.env, {
   WHATSAPP_TEST_RECIPIENTS:'917019339764',PAYMENT_TEST_RECIPIENTS:'917019339764',
 });
 const { assertManualJourneyAllowed } = await import('./journey-guard.js');
-const { startJourneySchema, listEligiblePaymentInvoices } = await import('./manual-journeys.js');
+const { startJourneySchema, listEligiblePaymentInvoices, wasDeliveredToCustomer } = await import('./manual-journeys.js');
 const { env } = await import('../../config/env.js');
 
 it('requires explicit unpaid confirmation, a real balance, and the expected due-days value', () => {
@@ -17,7 +17,15 @@ it('requires explicit unpaid confirmation, a real balance, and the expected due-
   for(const change of [{confirmedUnpaid:false},{outstandingAmount:0},{outstandingAmount:NaN},{outstandingAmount:1.001},{expectedDueDays:0},{recipient:'919999999999'}]) assert.equal(startJourneySchema.safeParse({...valid,...change}).success,false);
 });
 
-it('eligible discovery is read-only and excludes paid, started, future, pre-cutoff and Off-material invoices',async(t)=>{
+const delivered={job_type:'invoice_delivery',status:'completed',messages:{status:'delivered'}};
+it('only an invoice the customer actually received counts as delivered',()=>{
+  assert.equal(wasDeliveredToCustomer([delivered]),true);
+  assert.equal(wasDeliveredToCustomer(delivered),true);
+  assert.equal(wasDeliveredToCustomer([{...delivered,job_type:'manual_resend',messages:[{status:'read'}]}]),true);
+  for(const jobs of [undefined,null,[],[{...delivered,status:'failed'}],[{...delivered,messages:{status:'failed'}}],[{...delivered,messages:{status:'queued'}}],[{...delivered,job_type:'payment_reminder'}]]) assert.equal(wasDeliveredToCustomer(jobs),false);
+});
+
+it('eligible discovery is read-only and excludes paid, started, future, pre-cutoff, Off-material and undelivered invoices',async(t)=>{
   const writes:string[]=[];
   const http=t.mock.method(globalThis,'fetch',async(input: Parameters<typeof fetch>[0],init?:RequestInit)=>{
     const path=new URL(String(input)).pathname;
@@ -29,11 +37,14 @@ it('eligible discovery is read-only and excludes paid, started, future, pre-cuto
     if(path.includes('system_settings'))return Response.json({settings:{payment_reminders:{dueDays:3,firstReminderDelaySeconds:120,repeatReminderDelaySeconds:180,maximumReminders:3},tmt_material_controls:{version:1,materials:{}}}});
     if(path.endsWith('/customers'))return Response.json([{sap_customer_number:'510191',display_name:'CASTLE BUILDERS'}]);
     if(path.endsWith('/invoices'))return Response.json([
-      {sap_billing_document:'STARTED',payment_follow_up_cases:{id:1}},
-      {sap_billing_document:'PAID',invoice_receivables:{payment_status:'paid',outstanding_amount:0}},
+      {sap_billing_document:'STARTED',payment_follow_up_cases:{id:1},communication_jobs:[delivered]},
+      {sap_billing_document:'PAID',invoice_receivables:{payment_status:'paid',outstanding_amount:0},communication_jobs:[delivered]},
+      {sap_billing_document:'ELIGIBLE',communication_jobs:[{job_type:'payment_reminder',status:'completed',messages:{status:'delivered'}},delivered]},
+      {sap_billing_document:'OFF',communication_jobs:[delivered]},
+      {sap_billing_document:'FAILEDSEND',communication_jobs:[{job_type:'invoice_delivery',status:'failed',messages:{status:'failed'}}]},
     ]);
     if(path.endsWith('/A_BillingDocument'))return Response.json({d:{results:[
-      ...['ELIGIBLE','STARTED','PAID','OFF'].map(BillingDocument=>({BillingDocument,BillingDocumentDate:'2026-10-24',CreationDate:'2026-10-24',CreationTime:'PT14H0M0S',TotalGrossAmount:'1000',TransactionCurrency:'INR'})),
+      ...['ELIGIBLE','STARTED','PAID','OFF','UNSENT','FAILEDSEND'].map(BillingDocument=>({BillingDocument,BillingDocumentDate:'2026-10-24',CreationDate:'2026-10-24',CreationTime:'PT14H0M0S',TotalGrossAmount:'1000',TransactionCurrency:'INR'})),
       {BillingDocument:'OLD',BillingDocumentDate:'2026-10-19',CreationDate:'2026-10-24',CreationTime:'PT14H0M0S',TransactionCurrency:'INR'},
       {BillingDocument:'FUTURE',BillingDocumentDate:'2099-01-01',CreationDate:'2026-10-24',CreationTime:'PT14H0M0S',TransactionCurrency:'INR'},
     ]}});
