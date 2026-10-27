@@ -83,20 +83,32 @@ export function PaymentFollowUpsPage({
     return () => window.clearInterval(timer);
   }, [load]);
 
+  const sendingNow_ = cases.some(isSending);
+  useEffect(() => {
+    if (!sendingNow_) return;
+    const timer = window.setInterval(() => {
+      if (document.hidden) return;
+      void apiRequest<PaymentFollowUpCase[]>('/payment-follow-up/cases').then(setCases).catch(() => undefined);
+    }, 8_000);
+    return () => window.clearInterval(timer);
+  }, [sendingNow_]);
+
+  const hideLegacy = Boolean(paymentConfig?.manualJourneys);
+  const visibleCases = useMemo(() => cases.filter((item) => !(hideLegacy && isLegacyOpenJourney(item))), [cases, hideLegacy]);
   const reminderOptions = useMemo(
-    () => [...new Set(cases.map(reminderStatus))].sort().map((value) => ({ value, label: humanize(value) })),
-    [cases],
+    () => [...new Set(visibleCases.map(reminderStatus))].sort().map((value) => ({ value, label: humanize(value) })),
+    [visibleCases],
   );
   const paymentStatusOptions = useMemo(
-    () => [...new Set(cases.map((item) => item.receivable?.payment_status).filter((value): value is string => Boolean(value)))]
+    () => [...new Set(visibleCases.map((item) => item.receivable?.payment_status).filter((value): value is string => Boolean(value)))]
       .sort().map((value) => ({ value, label: humanize(value) })),
-    [cases],
+    [visibleCases],
   );
-  const searched = useMemo(() => cases.filter((item) =>
+  const searched = useMemo(() => visibleCases.filter((item) =>
     (!reminder || reminderStatus(item) === reminder)
     && (!paymentStatus || item.receivable?.payment_status === paymentStatus)
     && matchesSearch(search, item.customer?.display_name, item.customer?.sap_customer_number, item.invoice?.sap_billing_document)),
-  [cases, reminder, paymentStatus, search]);
+  [visibleCases, reminder, paymentStatus, search]);
   const eligibleFiltered = useMemo(() => eligible.filter((item) => matchesSearch(search, item.customerName, item.customerNumber, item.invoiceNumber)), [eligible, search]);
   const bucketCounts: Record<Bucket,number> = { journey: searched.filter((item) => !isSettled(item)).length, paid: searched.filter(isSettled).length, eligible: eligibleFiltered.length };
   const filtered = useMemo(() => searched.filter((item) => inBucket(item, bucket)), [searched, bucket]);
@@ -154,7 +166,7 @@ export function PaymentFollowUpsPage({
             </button>
           ))}
         </div>
-        <p className="list-summary">Eligibility uses the invoice date + {paymentConfig?.dueDays ?? 3} days, enabled customers and approved materials. Payment is confirmed by your team, not verified from SAP. No reminders start until you choose Start journey.</p>
+        {bucket === 'eligible' && <p className="list-summary">Eligibility uses the invoice date + {paymentConfig?.dueDays ?? 3} days, enabled customers and approved materials. Payment is confirmed by your team, not verified from SAP. No reminders start until you choose Start journey.</p>}
         {!loading && bucket !== 'eligible' && totalDue > 0 && (
           <p className="list-summary"><strong>{formatCurrency(totalDue, dueCurrency)}</strong> still to pay across {filtered.filter((item) => !isSettled(item)).length} invoices</p>
         )}
@@ -249,6 +261,21 @@ const BUCKETS: Array<{ key: Bucket; label: string }> = [
   { key: 'eligible', label: 'All eligible' },
   { key: 'paid', label: 'Paid' },
 ];
+
+// Demo journeys from before manual mode were never started by anyone here; keep them out of the working list.
+function isLegacyOpenJourney(paymentCase: PaymentFollowUpCase): boolean {
+  return !isSettled(paymentCase) && paymentCase.receivable?.raw_data?.manual_payment_journey !== true;
+}
+
+function isSending(paymentCase: PaymentFollowUpCase): boolean {
+  if (isSettled(paymentCase) || isLegacyOpenJourney(paymentCase)) return false;
+  const job = paymentCase.latestJob;
+  const messageStatus = relationOne(job?.messages)?.status;
+  const dueSoon = paymentCase.status === 'active' && Boolean(paymentCase.next_action_at) && Date.parse(String(paymentCase.next_action_at)) - Date.now() < 120_000;
+  return dueSoon
+    || ['pending', 'awaiting_approval', 'queued', 'processing'].includes(job?.status ?? '')
+    || ['created', 'queued', 'sent'].includes(messageStatus ?? '');
+}
 
 function isSettled(paymentCase: PaymentFollowUpCase): boolean {
   return Boolean(paymentCase.resolved_at) || (paymentCase.receivable ? Number(paymentCase.receivable.outstanding_amount) <= 0 : false);

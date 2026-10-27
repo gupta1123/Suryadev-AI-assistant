@@ -1586,3 +1586,5 @@ input[aria-invalid="true"] { border-color: #dc2626; }
 @keyframes side-in { from { transform: translateX(32px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes side-fade { from { opacity: 0; } to { opacity: 1; } }
 @media (max-width: 640px) { .side-panel__head, .side-panel__body, .side-panel__foot { padding-left: 18px; padding-right: 18px; } .bulk-bar { flex-wrap: wrap; } }
+.pagination__size span { white-space: nowrap; }
+.pagination__size select { width: auto; }
