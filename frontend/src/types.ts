@@ -432,6 +432,7 @@ export type PaymentReminderMessage = {
 
 export type PaymentReminderJob = {
   marketing_copy?: MarketingCopyInfo;
+  metadata?: { outstanding_amount?: number | string } & Record<string, unknown>;
   id: number;
   status: string;
   attempt_count: number;

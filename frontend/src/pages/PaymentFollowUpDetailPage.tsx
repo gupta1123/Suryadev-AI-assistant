@@ -400,7 +400,8 @@ export function PaymentFollowUpDetailPage({
                 {day.items.map(({ job, message, n, ms, tone: messageTone, failure }) => (
                   <div className="pf-turn" key={job.id}>
                     <Bubble tag={`Reminder ${n}`} tone={messageTone} time={formatTime(Number.isFinite(ms) ? new Date(ms).toISOString() : job.created_at)}>
-                      <p>{message?.body ?? `Payment reminder for invoice ${invoiceNumber ?? ''}`.trim()}</p>
+                      <ReminderText customerName={customer?.display_name} amount={Number(job.metadata?.outstanding_amount ?? outstanding)}
+                        invoiceNumber={invoiceNumber} invoiceDate={paymentCase.invoice?.billing_document_date} />
                     </Bubble>
                     <MarketingCopyStatus info={job.marketing_copy} />
                     {failure && <p className="pf-notice"><AlertCircle size={12} aria-hidden="true" /> {failure}</p>}
@@ -588,4 +589,19 @@ function daysUntil(date?: string | null): number | null {
   const due = Date.parse(`${date.slice(0, 10)}T00:00:00Z`);
   const today = Date.parse(`${todayInIndia()}T00:00:00Z`);
   return Number.isNaN(due) ? null : Math.round((due - today) / 86_400_000);
+}
+
+// The text the customer receives: WhatsApp template "payment_reminder_v3" (English), filled with the
+// same values the backend sends. Keep in step with the approved template in MSG91.
+function ReminderText({ customerName, amount, invoiceNumber, invoiceDate }: {
+  customerName?: string | undefined; amount: number; invoiceNumber?: string | undefined; invoiceDate?: string | null | undefined;
+}) {
+  const money = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+  return (
+    <p className="pf-template">
+      {`Hello ${customerName ?? 'Customer'},\n\nThis is a payment reminder for `}<strong>₹{money}</strong>{' pending against invoice '}<strong>{invoiceNumber ?? ''}</strong>
+      {' dated '}<strong>{formatDate(invoiceDate)}</strong>
+      {'.\n\nPlease arrange payment at your earliest convenience. If payment is not made on or before the due date, interest will be levied at 24% per annum. If payment has already been made, please ignore this message.\n\nRegards,\nSuryadev Alloys and Power Private Limited'}
+    </p>
+  );
 }

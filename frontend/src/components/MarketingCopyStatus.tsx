@@ -16,11 +16,10 @@ export function MarketingCopyStatus({ info }: { info?: MarketingCopyInfo }) {
       ) : info.copies.map((copy) => (
         <div key={copy.id}>
           <p><span className="mono">{copy.recipient}</span> · <span data-copy-status={copy.status}>{COPY_LABEL[copy.status]}</span></p>
-          {copy.accepted_at && <small>{formatDateTime(copy.accepted_at)} · Delivery and read receipt not tracked here</small>}
+          {copy.accepted_at && <small>{formatDateTime(copy.accepted_at)}</small>}
           {copy.last_error && <details><summary>Copy details</summary><small>{copy.last_error}</small></details>}
         </div>
       ))}
-      <small>Separate from the customer's delivery and read status.</small>
     </section>
   );
 }

@@ -1593,3 +1593,4 @@ input[aria-invalid="true"] { border-color: #dc2626; }
 .journey-pill--done { color: #9a3412; background: #ffedd5; }
 .journey-pill--paused { color: #52525b; background: #f4f4f5; }
 .journey-pill--paid { color: #15803d; background: #dcfce7; }
+.pf-template { white-space: pre-line; }
