@@ -81,7 +81,7 @@ export async function listTmtMaterials(refresh = false, exactCode?: string) {
   if (!cache || refresh || Date.now() - cache.loadedAt > 5 * 60_000) {
     try {
       cache = { items: await sapProducts(), checkedAt: new Date().toISOString(), loadedAt: Date.now() };
-    } catch { directoryError = 'The SAP product list is unavailable. Saved materials are still shown; use Refresh to retry.'; }
+    } catch { directoryError = 'The SAP product list could not be read, so no product list is shown. Only materials already approved in this app appear below. Use Refresh to retry.'; }
   }
   const state = await readMaterialState();
   const byCode = new Map((cache?.items ?? []).map(row => [row.code, row]));
