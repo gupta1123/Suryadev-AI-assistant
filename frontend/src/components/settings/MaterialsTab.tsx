@@ -10,7 +10,7 @@ import { LiveNote, Pill, Skeleton } from './ui';
 type Material = { code: string; description: string; group: string; type: string; unit: string; enabled: boolean; source: string; updatedAt: string | null };
 const TYPE_LABELS: Record<string, string> = { ZFG: 'Finished goods', ZSFG: 'Semi-finished', ZBYP: 'By-product', ZRM: 'Raw material' };
 const typeLabel = (type: string) => TYPE_LABELS[type] ?? type;
-type Directory = { items: Material[]; directoryError: string | null; checkedAt: string | null; mode: string; note: string };
+type Directory = { items: Material[]; directoryError: string | null; checkedAt: string | null; mode: string; note: string; source?: string | null };
 
 export function MaterialsTab() {
   const [data, setData] = useState<Directory | null>(null);
@@ -57,6 +57,7 @@ export function MaterialsTab() {
       <button type="button" className="button button--secondary" disabled={loading || busy} onClick={() => void load(true)}><RefreshCw size={15} /> Refresh from SAP</button></div>
     {notice && <LiveNote>{notice}</LiveNote>}{error && <LiveNote tone="bad">{error}</LiveNote>}
     {data?.directoryError && <div className="alert alert--error">{data.directoryError}</div>}
+    {data?.source === 'billing_documents' && <LiveNote>The SAP product list can't be read yet, so this shows materials found on invoices. It becomes the full product list once SAP access is added.</LiveNote>}
     {data && data.mode !== 'dashboard' && <LiveNote tone="bad">Dashboard material controls are not active. Changes are locked.</LiveNote>}
     <form className="st-material-lookup" onSubmit={event => { event.preventDefault(); if (code.trim()) void load(false, code.trim().toUpperCase()); }}>
       <label>Exact SAP material code<input value={code} maxLength={40} placeholder="e.g. 30000032" onChange={event => setCode(event.target.value)} /></label>
