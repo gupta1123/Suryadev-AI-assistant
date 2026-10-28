@@ -19,7 +19,7 @@ export class SapODataClient {
   async collection(
     service: string,
     entitySet: string,
-    options: { filter?: string; orderBy?: string; select?: string[]; top?: number; skip?: number } = {},
+    options: { filter?: string; orderBy?: string; select?: string[]; expand?: string; top?: number; skip?: number } = {},
   ): Promise<ODataRecord[]> {
     const url = this.serviceUrl(service, entitySet);
     url.searchParams.set('$format', 'json');
@@ -28,6 +28,7 @@ export class SapODataClient {
     if (options.filter) url.searchParams.set('$filter', options.filter);
     if (options.orderBy) url.searchParams.set('$orderby', options.orderBy);
     if (options.select?.length) url.searchParams.set('$select', options.select.join(','));
+    if (options.expand) url.searchParams.set('$expand', options.expand);
 
     const rows: ODataRecord[] = [];
     let nextUrl = url.toString();

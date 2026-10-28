@@ -7,7 +7,9 @@ import { PaginationControls, usePagination } from '../PaginationControls';
 import { Modal } from '../Modal';
 import { LiveNote, Pill, Skeleton } from './ui';
 
-type Material = { code: string; description: string; group: string; enabled: boolean; source: string; updatedAt: string | null };
+type Material = { code: string; description: string; group: string; type: string; unit: string; enabled: boolean; source: string; updatedAt: string | null };
+const TYPE_LABELS: Record<string, string> = { ZFG: 'Finished goods', ZSFG: 'Semi-finished', ZBYP: 'By-product', ZRM: 'Raw material' };
+const typeLabel = (type: string) => TYPE_LABELS[type] ?? type;
 type Directory = { items: Material[]; directoryError: string | null; checkedAt: string | null; mode: string; note: string };
 
 export function MaterialsTab() {
@@ -17,6 +19,7 @@ export function MaterialsTab() {
   const [notice, setNotice] = useState('');
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
+  const [type, setType] = useState('');
   const [code, setCode] = useState('');
   const [selected, setSelected] = useState<Material | null>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -34,8 +37,9 @@ export function MaterialsTab() {
   }, []);
   useEffect(() => { void load(); }, [load]);
   const filtered = useMemo(() => (data?.items ?? []).filter(row =>
-    (!status || (status === 'on') === row.enabled) && matchesSearch(search, row.code, row.description, row.group)), [data, status, search]);
-  const paging = usePagination(filtered, 'tmt-materials', `${status}|${search}`, 25);
+    (!status || (status === 'on') === row.enabled) && (!type || row.type === type) && matchesSearch(search, row.code, row.description, row.group, typeLabel(row.type))), [data, status, type, search]);
+  const typeOptions = useMemo(() => [...new Set((data?.items ?? []).map(row => row.type).filter(Boolean))].sort().map(value => ({ value, label: typeLabel(value) })), [data]);
+  const paging = usePagination(filtered, 'tmt-materials', `${status}|${type}|${search}`, 25);
   async function save() {
     if (!selected || !confirmed) return;
     setBusy(true); setError('');
@@ -58,15 +62,16 @@ export function MaterialsTab() {
       <label>Exact SAP material code<input value={code} maxLength={40} placeholder="e.g. 30000032" onChange={event => setCode(event.target.value)} /></label>
       <button type="submit" className="button button--secondary" disabled={loading || !code.trim()}>Find in SAP</button></form>
     <FilterBar search={search} searchPlaceholder="Search material code, description or group" onSearchChange={setSearch} active={Boolean(search || status)} onClear={() => { setSearch(''); setStatus(''); }}>
-      <FilterSelect label="Status" value={status} onChange={setStatus} options={[{ value: 'on', label: 'On' }, { value: 'off', label: 'Off' }]} /></FilterBar>
+      <FilterSelect label="Status" value={status} onChange={setStatus} options={[{ value: 'on', label: 'On' }, { value: 'off', label: 'Off' }]} />
+      <FilterSelect label="Type" value={type} onChange={setType} options={typeOptions} /></FilterBar>
     {loading ? <Skeleton rows={5} /> : <>
-      <div className="st-material-table"><table className="st-mini"><thead><tr><th>Material code</th><th>SAP description</th><th>Group</th><th>Status</th><th>Last changed</th><th>Action</th></tr></thead><tbody>
-        {paging.pageRows.map(row => <tr key={row.code}><td className="mono">{row.code}</td><td>{row.description || '—'}</td><td>{row.group || '—'}</td><td><Pill tone={row.enabled ? 'ok' : 'off'}>{row.enabled ? 'On' : 'Off'}</Pill>{row.source === 'server_default' && <small className="st-hint">Existing server approval</small>}</td><td>{row.updatedAt ? formatDateTime(row.updatedAt) : '—'}</td><td><button type="button" className="button button--secondary st-sm" disabled={data?.mode !== 'dashboard' || busy} onClick={() => { setSelected(row); setConfirmed(false); setError(''); }}>{row.enabled ? 'Turn off' : 'Turn on'}</button></td></tr>)}
-        {!paging.total && <tr><td colSpan={6}>No matching materials. Try the exact SAP code lookup above.</td></tr>}
+      <div className="st-material-table"><table className="st-mini"><thead><tr><th>Material code</th><th>SAP description</th><th>Type</th><th>Group</th><th>Status</th><th>Last changed</th><th>Action</th></tr></thead><tbody>
+        {paging.pageRows.map(row => <tr key={row.code}><td className="mono">{row.code}</td><td>{row.description || '—'}</td><td>{row.type ? typeLabel(row.type) : '—'}</td><td>{row.group || '—'}</td><td><Pill tone={row.enabled ? 'ok' : 'off'}>{row.enabled ? 'On' : 'Off'}</Pill>{row.source === 'server_default' && <small className="st-hint">Existing server approval</small>}</td><td>{row.updatedAt ? formatDateTime(row.updatedAt) : '—'}</td><td><button type="button" className="button button--secondary st-sm" disabled={data?.mode !== 'dashboard' || busy} onClick={() => { setSelected(row); setConfirmed(false); setError(''); }}>{row.enabled ? 'Turn off' : 'Turn on'}</button></td></tr>)}
+        {!paging.total && <tr><td colSpan={7}>No matching materials. Try the exact SAP code lookup above.</td></tr>}
       </tbody></table></div>
       <PaginationControls {...paging} noun="materials" onPageChange={paging.setPage} onPageSizeChange={paging.setPageSize} />
     </>}
-    {data?.checkedAt && <p className="st-hint">Billing-material discovery last refreshed {formatDateTime(data.checkedAt)}.</p>}
+    {data?.checkedAt && <p className="st-hint">SAP product list last refreshed {formatDateTime(data.checkedAt)}.</p>}
     {selected && <Modal title={`${selected.enabled ? 'Turn off' : 'Turn on'} TMT material?`} description={`SAP material ${selected.code}`} onClose={() => { if (!busy) setSelected(null); }}>
       <div className="st-panel"><h3>{selected.code} — {selected.description || 'No description available'}</h3>
         <p>{selected.enabled ? 'All unsent document messages containing this material will be blocked at the next dispatch check, including reminders, manager copies and document-linked help alerts.' : 'Confirm this is a TMT material you authorise for WhatsApp. Enabling may release previously skipped or queued documents automatically on the next poll. Customer approval and document date rules still apply.'}</p>

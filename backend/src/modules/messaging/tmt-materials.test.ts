@@ -30,9 +30,15 @@ before(async () => {
     if (url.hostname === 'sap.test') {
       if (sapDown) return Response.json({ error: 'unavailable' }, { status: 503 });
       const filter = url.searchParams.get('$filter');
-      const rows = [{ Material: '30000032', MaterialGroup: '190', BillingDocumentItemText: 'Suryadev Fe550D Bend 10mm' },
-        { Material: '30000123', MaterialGroup: '190', BillingDocumentItemText: 'Existing TMT material' }];
-      return Response.json({ d: { results: filter ? rows.filter(x => filter === `Material eq '${x.Material}'`) : rows } });
+      const desc = (text: string) => ({ results: [{ Language: 'DE', ProductDescription: 'x' }, { Language: 'EN', ProductDescription: text }] });
+      const rows = [{ Product: '30000032', ProductType: 'ZFG', ProductGroup: '190', BaseUnit: 'MT', IsMarkedForDeletion: false, to_Description: desc('Suryadev Fe550D Bend 10mm') },
+        { Product: '30000123', ProductType: 'ZFG', ProductGroup: '190', BaseUnit: 'MT', IsMarkedForDeletion: false, to_Description: desc('Existing TMT material') },
+        { Product: '10000000', ProductType: 'ZRM', ProductGroup: '168', BaseUnit: 'MT', IsMarkedForDeletion: false, to_Description: desc('Pig Iron') },
+        { Product: '30000999', ProductType: 'ZFG', ProductGroup: '190', BaseUnit: 'MT', IsMarkedForDeletion: true, to_Description: desc('Deleted product') }];
+      assert.match(url.pathname, /API_PRODUCT_SRV\/A_Product$/, 'list must come from the Product Master, not billing items');
+      assert.equal(url.searchParams.get('$expand'), 'to_Description');
+      if (filter) { const exact = /^Product eq '(.+)'$/.exec(filter); if (exact) return Response.json({ d: { results: rows.filter(x => x.Product === exact[1]) } }); assert.match(filter, /ProductType eq 'ZFG'.*IsMarkedForDeletion eq false/); }
+      return Response.json({ d: { results: rows } });
     }
     if (url.origin === 'http://127.0.0.1:1') {
       if (databaseDown) return Response.json({ message: 'unavailable' }, { status: 503 });
@@ -70,6 +76,9 @@ describe('TMT material controls: isolated services, never sends', () => {
     const { data } = await r.json() as any;
     assert.equal(data.items.filter((x: any) => x.enabled).length, 4);
     assert.equal(data.items.find((x: any) => x.code === '30000032').enabled, false);
+    const pig = data.items.find((x: any) => x.code === '10000000');
+    assert.deepEqual([pig.description, pig.type, pig.group, pig.unit, pig.enabled], ['Pig Iron', 'ZRM', '168', 'MT', false]);
+    assert.equal(data.items.some((x: any) => x.code === '30000999'), false, 'products marked for deletion are not listed');
     assert.equal(writes, 0);
   });
   it('requires admin authentication for reads and writes', async () => {

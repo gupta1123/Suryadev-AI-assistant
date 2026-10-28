@@ -55,14 +55,14 @@ it('changing due days later keeps an existing journey frozen and starts nothing'
   try {
     await start(db);
     const before = (await db.query<any>('select c.next_action_at, r.due_date, r.raw_data from payment_follow_up_cases c join invoice_receivables r using (invoice_id)')).rows[0];
-    await db.exec(`update system_settings set settings='{"payment_reminders":{"dueDays":5,"updatedAt":"2026-10-27T00:00:00Z"}}'`);
+    await db.exec(`update system_settings set settings='{"payment_reminders":{"dueDays":90,"updatedAt":"2026-10-27T00:00:00Z"}}'`);
     const after = (await db.query<any>('select c.next_action_at, r.due_date, r.raw_data from payment_follow_up_cases c join invoice_receivables r using (invoice_id)')).rows[0];
     assert.deepEqual(after, before);
     assert.equal(new Date(after.due_date).toISOString().slice(0,10),'2026-10-27');
     assert.equal((await db.query('select * from payment_follow_up_cases')).rows.length,1);
-    // A new start under the changed setting is due invoice date + 5 days, so a 3-day-old invoice is not due.
+    // A new start under a longer setting (invoice date + 90 days) is not due yet. 90 keeps this independent of today's date.
     await db.exec('delete from payment_follow_up_cases; delete from invoice_receivables;');
-    await assert.rejects(start(db,{ ...rules, dueDays:5, updatedAt:'2026-10-27T00:00:00Z' }),/not due yet/);
+    await assert.rejects(start(db,{ ...rules, dueDays:90, updatedAt:'2026-10-27T00:00:00Z' }),/not due yet/);
   } finally { await db.close(); }
 });
 it('double-clicks/concurrent starts cannot create a second journey or reset a paid case', async () => {

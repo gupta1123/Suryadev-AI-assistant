@@ -20,6 +20,12 @@ const envSchema = z.object({
   SAP_API_USERNAME: z.string().min(1).optional(),
   SAP_API_PASSWORD: z.string().min(1).optional(),
   // Optional separate communication user, used only for the SALES GROUP lookup.
+  // Optional separate connection for the SAP Product Master. When unset the
+  // main SAP connection is used. Only product types listed here are shown in Settings.
+  SAP_PRODUCT_API_BASE_URL: z.string().url().optional(),
+  SAP_PRODUCT_API_USERNAME: z.string().min(1).optional(),
+  SAP_PRODUCT_API_PASSWORD: z.string().min(1).optional(),
+  SAP_PRODUCT_TYPES: z.string().default('ZFG,ZSFG,ZBYP,ZRM'),
   SAP_SALES_GROUP_API_USERNAME: z.string().default(''),
   SAP_SALES_GROUP_API_PASSWORD: z.string().default(''),
   SAP_POLL_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
@@ -200,6 +206,13 @@ export const isSapConfigured = Boolean(
     env.SAP_API_PASSWORD &&
     isSapHostApproved,
 );
+
+// Product Master connection: its own credentials when set, otherwise the main SAP connection.
+export const sapProductConnection = env.SAP_PRODUCT_API_BASE_URL && env.SAP_PRODUCT_API_USERNAME && env.SAP_PRODUCT_API_PASSWORD
+  ? { baseUrl: env.SAP_PRODUCT_API_BASE_URL, username: env.SAP_PRODUCT_API_USERNAME, password: env.SAP_PRODUCT_API_PASSWORD }
+  : isSapConfigured
+    ? { baseUrl: env.SAP_API_BASE_URL!, username: env.SAP_API_USERNAME!, password: env.SAP_API_PASSWORD! }
+    : undefined;
 
 export const sapAllowedCustomers = new Set(
   env.SAP_ALLOWED_CUSTOMERS.split(',').map((value) => value.trim()).filter(Boolean),
