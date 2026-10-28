@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { env, isSapConfigured, sapProductConnection, sapTmtMaterialIds } from '../../config/env.js';
+import { env, sapProductConnection, sapTmtMaterialIds } from '../../config/env.js';
 import { getSupabaseServerClient } from '../../lib/supabase.js';
 import { HttpError } from '../../lib/http.js';
 import { updateSettingsSection } from '../../lib/settings-store.js';
@@ -52,7 +52,7 @@ export async function assertInvoiceTmtAllowed(invoiceId: number): Promise<void> 
 }
 
 type Discovered = { code: string; description: string; group: string; type: string; unit: string };
-let cache: { items: Discovered[]; source: 'product_master' | 'billing_documents'; checkedAt: string; loadedAt: number } | undefined;
+let cache: { items: Discovered[]; checkedAt: string; loadedAt: number } | undefined;
 const PRODUCT_TYPES = env.SAP_PRODUCT_TYPES.split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
 export function productRows(rows: ODataRecord[]): Discovered[] {
   const unique = new Map<string, Discovered>();
@@ -76,39 +76,17 @@ async function sapProducts(code?: string): Promise<Discovered[]> {
     filter, select: ['Product', 'ProductType', 'ProductGroup', 'BaseUnit', 'IsMarkedForDeletion', 'to_Description'], expand: 'to_Description', top: code ? 1 : 2000,
   }));
 }
-// Fallback when the Product Master cannot be read: materials seen on readable billing documents.
-async function sapBillingMaterials(code?: string): Promise<Discovered[]> {
-  if (!isSapConfigured) throw new HttpError(409, 'SAP API connection is unavailable');
-  const rows = await new SapODataClient().collection('API_BILLING_DOCUMENT_SRV', 'A_BillingDocumentItem', {
-    ...(code ? { filter: `Material eq '${escapeODataString(code)}'` } : {}),
-    select: ['Material', 'MaterialGroup', 'BillingDocumentItemText'], top: code ? 1 : 10000,
-  });
-  const unique = new Map<string, Discovered>();
-  for (const row of rows) {
-    const id = normalize(row.Material);
-    if (materialCodeSchema.safeParse(id).success && !unique.has(id)) unique.set(id, { code: id, description: String(row.BillingDocumentItemText ?? '').trim(), group: String(row.MaterialGroup ?? '').trim(), type: '', unit: '' });
-  }
-  return [...unique.values()];
-}
-async function findProducts(code?: string): Promise<{ items: Discovered[]; source: 'product_master' | 'billing_documents' }> {
-  try { return { items: await sapProducts(code), source: 'product_master' }; }
-  catch (productError) {
-    try { return { items: await sapBillingMaterials(code), source: 'billing_documents' }; }
-    catch { throw productError; }
-  }
-}
 export async function listTmtMaterials(refresh = false, exactCode?: string) {
   let directoryError: string | null = null;
   if (!cache || refresh || Date.now() - cache.loadedAt > 5 * 60_000) {
     try {
-      const { items, source } = await findProducts();
-      cache = { items, source, checkedAt: new Date().toISOString(), loadedAt: Date.now() };
+      cache = { items: await sapProducts(), checkedAt: new Date().toISOString(), loadedAt: Date.now() };
     } catch { directoryError = 'The SAP product list is unavailable. Saved materials are still shown; use Refresh to retry.'; }
   }
   const state = await readMaterialState();
   const byCode = new Map((cache?.items ?? []).map(row => [row.code, row]));
   if (exactCode) {
-    const found = (await findProducts(exactCode)).items[0];
+    const found = (await sapProducts(exactCode))[0];
     if (!found) throw new HttpError(404, 'This material was not found in the SAP product list');
     byCode.set(found.code, found);
   }
@@ -119,12 +97,12 @@ export async function listTmtMaterials(refresh = false, exactCode?: string) {
     source: state.materials[row.code] ? 'saved' : sapTmtMaterialIds.has(row.code) ? 'server_default' : 'not_enabled',
     updatedAt: state.materials[row.code]?.updatedAt ?? null,
   })).sort((a,b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
-  return { items, directoryError, checkedAt: cache?.checkedAt ?? null, source: cache?.source ?? null, mode: env.TMT_MATERIAL_CONTROL_MODE, productTypes: PRODUCT_TYPES,
-    note: (cache?.source === 'billing_documents' ? 'The SAP Product Master is not reachable, so these are materials found on SAP billing documents. ' : 'Products from the SAP Product Master. ') + 'New codes start Off. All material lines must be On because the whole PDF is sent.' };
+  return { items, directoryError, checkedAt: cache?.checkedAt ?? null, mode: env.TMT_MATERIAL_CONTROL_MODE, productTypes: PRODUCT_TYPES,
+    note: 'Products from the SAP Product Master. New codes start Off. All material lines must be On because the whole PDF is sent.' };
 }
 export async function setTmtMaterial(code: string, enabled: boolean, expectedEnabled: boolean, username: string) {
   if (env.TMT_MATERIAL_CONTROL_MODE !== 'dashboard') throw new HttpError(409, 'Dashboard material controls are not active on this server');
-  const found = enabled ? (await findProducts(code)).items[0] : undefined;
+  const found = enabled ? (await sapProducts(code))[0] : undefined;
   if (enabled && !found) throw new HttpError(404, 'Material was not found in the SAP product list; approval is blocked');
   return updateSettingsSection(KEY, previous => {
     const state = parseMaterialState(previous);

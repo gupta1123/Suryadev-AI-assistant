@@ -16,7 +16,6 @@ const { updateSettingsSection } = await import('../../lib/settings-store.js');
 const originalFetch = globalThis.fetch;
 let state: Record<string, any> = { help_request_alerts: { recipient: '919445029682' }, payment_reminders: { maximumReminders: 3 } };
 let sapDown = false;
-let productMasterDown = false;
 let databaseDown = false;
 let conflictOnce = false;
 let writes = 0;
@@ -31,8 +30,6 @@ before(async () => {
     if (url.hostname === 'sap.test') {
       if (sapDown) return Response.json({ error: 'unavailable' }, { status: 503 });
       const filter = url.searchParams.get('$filter');
-      if (url.pathname.endsWith('/A_BillingDocumentItem')) return Response.json({ d: { results: [{ Material: '30000032', MaterialGroup: '190', BillingDocumentItemText: 'Billed bend 10mm' }] } });
-      if (productMasterDown) return Response.json({ error: { message: { value: 'no start authorization' } } }, { status: 403 });
       const desc = (text: string) => ({ results: [{ Language: 'DE', ProductDescription: 'x' }, { Language: 'EN', ProductDescription: text }] });
       const rows = [{ Product: '30000032', ProductType: 'ZFG', ProductGroup: '190', BaseUnit: 'MT', IsMarkedForDeletion: false, to_Description: desc('Suryadev Fe550D Bend 10mm') },
         { Product: '30000123', ProductType: 'ZFG', ProductGroup: '190', BaseUnit: 'MT', IsMarkedForDeletion: false, to_Description: desc('Existing TMT material') },
@@ -83,18 +80,6 @@ describe('TMT material controls: isolated services, never sends', () => {
     assert.deepEqual([pig.description, pig.type, pig.group, pig.unit, pig.enabled], ['Pig Iron', 'ZRM', '168', 'MT', false]);
     assert.equal(data.items.some((x: any) => x.code === '30000999'), false, 'products marked for deletion are not listed');
     assert.equal(writes, 0);
-  });
-  it('falls back to materials on billing documents when the Product Master is not readable', async () => {
-    productMasterDown = true;
-    try {
-      const r = await originalFetch(base + '/messaging/tmt-materials?refresh=true', { headers: { cookie } });
-      const { data } = await r.json() as any;
-      assert.equal(data.source, 'billing_documents'); assert.equal(data.directoryError, null);
-      assert.match(data.note, /not reachable/);
-      assert.equal(data.items.find((x: any) => x.code === '30000032').description, 'Billed bend 10mm');
-    } finally { productMasterDown = false; }
-    const back = await (await originalFetch(base + '/messaging/tmt-materials?refresh=true', { headers: { cookie } })).json() as any;
-    assert.equal(back.data.source, 'product_master');
   });
   it('requires admin authentication for reads and writes', async () => {
     assert.equal((await originalFetch(base + '/messaging/tmt-materials')).status, 401);
