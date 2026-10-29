@@ -108,7 +108,7 @@ function Overview({
             <button className="button button--secondary" type="button" onClick={() => onView('disable')}>Turn off messaging</button>
           )}
         </div>
-        {row.status === 'off' && !row.phone && <p className="st-hint">SAP has no phone number for this customer, so it can’t be turned on.</p>}
+        {row.status === 'nophone' && <p className="st-hint">SAP has no phone number for this customer, so it can’t be turned on.</p>}
       </section>
 
       {canManage && <Eligibility key={`${row.number}-${row.status}-${revision}`} customerNumber={row.number} />}
@@ -181,6 +181,8 @@ function statusSentence(row: CustomerRow): string {
       return `SAP now lists ${formatPhone(row.phone)}, but you approved ${formatPhone(setting?.approvedPhone)}. New automatic documents are blocked until you approve the new number. Turn messaging off to also block existing reminders and queued document sends.`;
     case 'off':
       return 'New invoice, memo, reminder, sample-document sends and manager copies are blocked. Messages already handed to WhatsApp cannot be recalled. Customer-initiated Need Help alerts are handled separately.';
+    case 'nophone':
+      return 'SAP has no phone number for this customer, so it can’t be turned on until one is added in SAP.';
     case 'locked':
       return 'This customer cannot currently be approved. Refresh SAP and check whether dashboard approval is enabled on the server.';
     default:

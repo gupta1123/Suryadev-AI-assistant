@@ -25,7 +25,8 @@ function matchesManagerFilter(filter: string, kind: ReturnType<typeof managerSum
 }
 
 function inChip(chip: Chip, status: CustomerStatus): boolean {
-  if (chip === 'available') return status !== 'locked';
+  if (chip === 'available') return status !== 'locked' && status !== 'nophone';
+  if (chip === 'locked') return status === 'locked' || status === 'nophone';
   return status === chip;
 }
 
@@ -155,7 +156,7 @@ export function CustomersTab({
         </FilterBar>
 
         {chip === 'locked' && (
-          <p className="st-callout"><Info size={15} aria-hidden="true" /> These customers cannot currently be enabled. Check the onboarding notice above or ask your administrator to enable dashboard approval.</p>
+          <p className="st-callout"><Info size={15} aria-hidden="true" /> These customers can’t be turned on yet: SAP has no phone number for them, or approval isn’t available. Add the number in SAP, then refresh.</p>
         )}
 
         {showSkeleton ? <Skeleton rows={5} /> : !visible.length ? (

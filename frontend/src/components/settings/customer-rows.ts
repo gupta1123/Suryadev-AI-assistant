@@ -2,7 +2,7 @@ import { formatPhone } from '../../lib/format';
 import type { MessagingCustomer, MessagingOverview, SapMasterDirectoryItem } from '../../types';
 import type { Tone } from './ui';
 
-export type CustomerStatus = 'enabled' | 'review' | 'off' | 'locked' | 'unknown';
+export type CustomerStatus = 'enabled' | 'review' | 'off' | 'nophone' | 'locked' | 'unknown';
 
 export type CustomerRow = {
   number: string;
@@ -17,6 +17,7 @@ export const STATUS_PILL: Record<CustomerStatus, { tone: Tone; label: string }> 
   enabled: { tone: 'ok', label: 'Messaging on' },
   review: { tone: 'warn', label: 'Number changed' },
   off: { tone: 'off', label: 'Off' },
+  nophone: { tone: 'off', label: 'No number in SAP' },
   locked: { tone: 'off', label: 'Not available' },
   unknown: { tone: 'off', label: 'Unknown' },
 };
@@ -30,6 +31,11 @@ function statusOf(messaging: MessagingOverview | null, customer: MessagingCustom
     case 'not_enabled': return 'off';
     default: return 'locked';
   }
+}
+
+// A customer that is Off and has no number in SAP can't be messaged, so it isn't counted as messageable.
+function withoutNumber(status: CustomerStatus, phone: string | null | undefined): CustomerStatus {
+  return status === 'off' && !phone ? 'nophone' : status;
 }
 
 /**
@@ -47,7 +53,7 @@ export function buildCustomerRows(
     number,
     name: sap?.name || customer?.name || number,
     phone: customer?.livePhone ?? sap?.primaryPhone ?? null,
-    status: statusOf(messaging, customer),
+    status: withoutNumber(statusOf(messaging, customer), customer?.livePhone ?? sap?.primaryPhone),
     messaging: customer,
     sap,
   });
