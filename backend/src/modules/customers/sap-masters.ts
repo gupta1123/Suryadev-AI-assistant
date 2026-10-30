@@ -20,7 +20,7 @@ export type SapMasterCustomer = {
 };
 type Directory = { items: SapMasterCustomer[]; managerMappingAvailable: boolean };
 const CACHE_MS = 5 * 60_000;
-const MAX_ROWS = 10_000;
+const MAX_ROWS = 50_000;
 
 /** Fresh, targeted check for already queued SAP messages; never use directory cache. */
 export async function readCurrentSapPrimaryPhone(customerNumber: string): Promise<string | null> {
