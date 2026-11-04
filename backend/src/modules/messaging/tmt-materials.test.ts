@@ -19,6 +19,8 @@ let sapDown = false;
 let databaseDown = false;
 let conflictOnce = false;
 let writes = 0;
+let revision = 0;
+const settingsTimestamp = () => `2026-10-24T00:00:00.${String(revision).padStart(6, '0')}+00:00`;
 let providerCalls = 0;
 let server: Server;
 let base = '';
@@ -44,12 +46,20 @@ before(async () => {
       if (databaseDown) return Response.json({ message: 'unavailable' }, { status: 503 });
       if (url.pathname.endsWith('/system_settings')) {
         if (init?.method === 'PATCH') {
-          if (conflictOnce) { conflictOnce = false; state.other_section = { retained: true }; return Response.json(null); }
-          assert.equal(url.searchParams.get('settings'), 'eq.' + JSON.stringify(state), 'saves must use compare-and-swap');
-          state = JSON.parse(String(init.body)).settings; writes++;
+          assert.ok(url.href.length < 512, 'settings must stay out of the request URL');
+          assert.equal(url.searchParams.get('updated_at'), 'eq.' + settingsTimestamp(), 'saves must compare the exact database timestamp');
+          if (conflictOnce) {
+            conflictOnce = false;
+            state.other_section = { retained: true };
+            revision++;
+            return Response.json(null);
+          }
+          state = JSON.parse(String(init.body)).settings;
+          revision++;
+          writes++;
           return Response.json({ id: 1 });
         }
-        return Response.json({ settings: structuredClone(state) });
+        return Response.json({ settings: structuredClone(state), updated_at: settingsTimestamp() });
       }
       if (url.pathname.endsWith('/invoice_items')) return Response.json([{ product_id: '30000032' }]);
       if (url.pathname.endsWith('/audit_logs')) return Response.json([]);
@@ -96,7 +106,10 @@ describe('TMT material controls: isolated services, never sends', () => {
     assert.equal(providerCalls, 0);
   });
   it('enables only the exact material and preserves unrelated settings', async () => {
+    const largeSection = { value: 'settings payload '.repeat(2000) };
+    state.large_section = largeSection;
     assert.equal((await put(true, false)).status, 200);
+    assert.deepEqual(state.large_section, largeSection);
     assert.equal(state.tmt_material_controls.materials['30000032'].enabled, true);
     assert.equal(state.help_request_alerts.recipient, '919445029682');
     assert.equal(state.payment_reminders.maximumReminders, 3);
