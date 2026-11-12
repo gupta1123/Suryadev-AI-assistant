@@ -31,7 +31,7 @@ export function wasDeliveredToCustomer(jobs: unknown): boolean {
   });
 }
 
-export async function listEligiblePaymentInvoices() {
+async function discoverEligiblePaymentInvoices() {
   const client = getSupabaseServerClient();
   const [settings, rules, materialState, customers] = await Promise.all([
     listCustomerSettings(), getReminderSettings(true), readMaterialState(),
@@ -65,8 +65,8 @@ export async function listEligiblePaymentInvoices() {
   const sap = new SapODataClient();
   const eligible = [];
   const today = todayInIndia();
-  for (let start = 0; start < candidates.length; start += 5) {
-    const results = await Promise.all(candidates.slice(start, start + 5).map(async ({ prior, customerNumber }) => {
+  for (let start = 0; start < candidates.length; start += 12) {
+    const results = await Promise.all(candidates.slice(start, start + 12).map(async ({ prior, customerNumber }) => {
       const customer = enabled.get(customerNumber)!;
       const number = prior.sap_billing_document;
       const [header] = await sap.collection('API_BILLING_DOCUMENT_SRV', 'A_BillingDocument', {
@@ -90,6 +90,29 @@ export async function listEligiblePaymentInvoices() {
   }
   return [...new Map(eligible.map(row=>[row.invoiceNumber,row])).values()].sort((a,b) => a.dueDate.localeCompare(b.dueDate) || a.invoiceNumber.localeCompare(b.invoiceNumber));
 }
+
+type EligibleRows = Awaited<ReturnType<typeof discoverEligiblePaymentInvoices>>;
+let eligibleCache: { rows: EligibleRows; at: number } | null = null;
+let eligibleRefresh: Promise<EligibleRows> | null = null;
+const ELIGIBLE_FRESH_MS = 60_000;
+const ELIGIBLE_STALE_MS = 180_000;
+
+/** The list is rebuilt from SAP, which is slow; a recent copy is reused and one rebuild is shared by all callers. */
+export async function listEligiblePaymentInvoices(): Promise<EligibleRows> {
+  const age = eligibleCache ? Date.now() - eligibleCache.at : Infinity;
+  if (eligibleCache && age < ELIGIBLE_FRESH_MS) return eligibleCache.rows;
+  if (!eligibleRefresh) {
+    eligibleRefresh = discoverEligiblePaymentInvoices()
+      .then((rows) => { eligibleCache = { rows, at: Date.now() }; return rows; })
+      .finally(() => { eligibleRefresh = null; });
+    eligibleRefresh.catch(() => undefined);
+  }
+  // A slightly old list is shown at once while a new one is built in the background.
+  if (eligibleCache && age < ELIGIBLE_STALE_MS) return eligibleCache.rows;
+  return eligibleRefresh;
+}
+
+export function clearEligiblePaymentCache() { eligibleCache = null; }
 
 export async function startManualPaymentJourney(number: string, input: z.infer<typeof startJourneySchema>, username: string) {
   if (env.PAYMENT_JOURNEY_MODE !== 'manual' || !isPaymentFollowUpSchedulerConfigured || !isMsg91Configured || !env.PAYMENT_FOLLOW_UP_ENABLED || !env.PAYMENT_FOLLOW_UP_SEND_ENABLED || !env.MSG91_SEND_ENABLED) throw new HttpError(409, 'Manual payment reminder sending is not enabled on the server');
@@ -124,6 +147,7 @@ export async function startManualPaymentJourney(number: string, input: z.infer<t
     p_rules: rules, p_default_materials: [...sapTmtMaterialIds], p_username: username,
   });
   if (error) throw new HttpError(error.code === 'PGRST202' ? 503 : 409, error.code === 'PGRST202' ? 'The manual payment journey SQL migration must be applied before starting journeys.' : error.message);
+  clearEligiblePaymentCache();
   return { caseId: Number(data) };
 }
 
