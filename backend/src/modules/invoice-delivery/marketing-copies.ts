@@ -6,7 +6,7 @@ import { createInvoiceDocumentUrl, getDeliveryJobContextById } from './repositor
 import {
   assertManagerCopyStillAllowed,
   MessagingRefusal,
-  resolveManagerCopyRecipient,
+  resolveManagerCopyRecipients,
   assertDocumentDateAllowed,
 } from '../messaging/guard.js';
 import { assertInvoiceTmtAllowed, TmtMaterialRefusal } from '../messaging/tmt-materials.js';
@@ -48,24 +48,25 @@ export async function enqueueMarketingCopy(
   const context = await getDeliveryJobContextById(jobId);
   assertDocumentDateAllowed({ documentDate: context.invoice.billing_document_date, documentCreatedAt: context.invoice.creation_datetime });
   // Use the configured source (live SAP or Settings), with no fallback manager.
-  // The resolver returns one unique recipient even if several sales areas agree.
-  const { recipient } = await resolveManagerCopyRecipient(customerNumber);
-  if (!recipient) return;
-  const copy = buildMarketingCopyPayload(payload, recipient);
-  if (!copy) return;
-  // Store no signed URL/token. A fresh URL for the SAME PDF is generated on dispatch.
-  const header = copy.payload.template.to_and_components[0]!.components.header_1;
-  if (header?.type === 'document') header.value = '';
-  const { error } = await getSupabaseServerClient().from('marketing_whatsapp_copies').upsert({
-    source_job_id: jobId, recipient, payload: copy,
-  }, { onConflict: 'source_job_id,recipient', ignoreDuplicates: true });
-  if (error) throw new Error(`Unable to queue marketing copy: ${error.message}`);
-  // A customer retry may use a revised template/sender. Pending copies must
-  // reflect that actual attempt, while accepted copies must never be requeued.
-  const { error: updateError } = await getSupabaseServerClient().from('marketing_whatsapp_copies')
-    .update({ payload: copy }).eq('source_job_id', jobId)
-    .eq('recipient', recipient).eq('status', 'pending');
-  if (updateError) throw new Error(`Unable to update marketing copy: ${updateError.message}`);
+  // Each distinct manager gets one copy, even when several sales areas agree.
+  const { recipients } = await resolveManagerCopyRecipients(customerNumber);
+  for (const recipient of recipients) {
+    const copy = buildMarketingCopyPayload(payload, recipient);
+    if (!copy) continue;
+    // Store no signed URL/token. A fresh URL for the SAME PDF is generated on dispatch.
+    const header = copy.payload.template.to_and_components[0]!.components.header_1;
+    if (header?.type === 'document') header.value = '';
+    const { error } = await getSupabaseServerClient().from('marketing_whatsapp_copies').upsert({
+      source_job_id: jobId, recipient, payload: copy,
+    }, { onConflict: 'source_job_id,recipient', ignoreDuplicates: true });
+    if (error) throw new Error(`Unable to queue marketing copy: ${error.message}`);
+    // A customer retry may use a revised template/sender. Pending copies must
+    // reflect that actual attempt, while accepted copies must never be requeued.
+    const { error: updateError } = await getSupabaseServerClient().from('marketing_whatsapp_copies')
+      .update({ payload: copy }).eq('source_job_id', jobId)
+      .eq('recipient', recipient).eq('status', 'pending');
+    if (updateError) throw new Error(`Unable to update marketing copy: ${updateError.message}`);
+  }
 }
 
 let timer: NodeJS.Timeout | undefined;

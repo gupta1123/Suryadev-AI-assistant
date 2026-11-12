@@ -82,10 +82,24 @@ export function managerSummary(row: CustomerRow): ManagerSummary {
     if (!copy.recipient) {
       return { kind: 'none', title: 'No copy', detail: copy.reason ?? 'SAP has no marketing manager for this customer.' };
     }
-    if (copy.recipient === customer.livePhone) {
+    // A customer can have several managers (one per sales group). Each gets a copy,
+    // except a manager whose number is the customer's own, who already has the message.
+    const all = copy.recipients?.length ? copy.recipients : [copy.recipient];
+    const extra = all.filter((phone) => phone !== customer.livePhone);
+    if (!extra.length) {
       return { kind: 'same', title: 'No extra copy', detail: `${formatPhone(copy.recipient)} already receives the customer’s message.` };
     }
-    return { kind: 'sap', title: 'From SAP', detail: formatPhone(copy.recipient), ...(copy.reason ? { warning: copy.reason } : {}) };
+    const skipped = copy.skippedAreas ?? 0;
+    const warnings = [
+      copy.reason,
+      skipped ? `${skipped} sales area${skipped === 1 ? ' has' : 's have'} no manager in SAP and ${skipped === 1 ? 'is' : 'are'} skipped.` : null,
+    ].filter(Boolean).join(' ');
+    return {
+      kind: 'sap',
+      title: extra.length > 1 ? `${extra.length} managers (from SAP)` : 'From SAP',
+      detail: extra.map(formatPhone).join(', '),
+      ...(warnings ? { warning: warnings } : {}),
+    };
   }
   const setting = customer.setting;
   if (setting?.managerPhone) {

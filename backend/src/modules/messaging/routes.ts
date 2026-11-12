@@ -94,6 +94,9 @@ function customerStatus(
   return evaluateLivePhone(setting, livePhone).allowed ? 'enabled' : 'phone_changed';
 }
 
+// Both policies (manual and SAP-routed) end up as one or more manager numbers.
+const managerRecipients = (manager: { allowed: true; recipient: string } & { recipients?: string[] }) => manager.recipients ?? [manager.recipient];
+
 messagingRouter.get(
   '/overview',
   asyncHandler(async (_request, response) => {
@@ -140,6 +143,8 @@ messagingRouter.get(
             managerCopy: {
               source: env.MSG91_MARKETING_COPY_SOURCE,
               recipient: manager.allowed ? manager.recipient : null,
+              recipients: manager.allowed ? ('recipients' in manager ? manager.recipients : [manager.recipient]) : [],
+              skippedAreas: manager.allowed && 'skippedAreas' in manager ? manager.skippedAreas : 0,
               allowed: manager.allowed && env.MSG91_MARKETING_COPY_ENABLED,
               reason: !env.MSG91_MARKETING_COPY_ENABLED ? 'Manager copies are disabled on the server' : manager.allowed ? null : manager.reason,
             },
@@ -204,9 +209,10 @@ messagingRouter.get(
           check('Customer is enabled in Settings', Boolean(setting?.enabled)),
           check('SAP phone matches the approved number', phoneCheck.allowed, phoneCheck.allowed ? undefined : phoneCheck.reason),
           check('A new document would be sent to the customer', sendCheck.allowed, sendCheck.allowed ? undefined : sendCheck.reason),
-          manager.allowed && manager.recipient === livePhone
+          manager.allowed && managerRecipients(manager).every((phone) => phone === livePhone)
             ? check('Marketing manager copy: not needed', true, 'The manager’s number is the customer’s own number, so no separate copy is sent.')
-            : check('Marketing manager copy would be sent', manager.allowed, manager.allowed ? undefined : manager.reason),
+            : check('Marketing manager copy would be sent', manager.allowed,
+              manager.allowed ? `${managerRecipients(manager).filter((phone) => phone !== livePhone).length} manager copy(ies)` : manager.reason),
         ],
       },
     });
@@ -233,6 +239,7 @@ messagingRouter.get('/customers/:customerNumber/approval-preview', asyncHandler(
     sharedPhoneCustomers: directory.items.filter(row => row.customerNumber !== customerNumber &&
       row.phones.some(value => value.number === phone)).map(row => ({ customerNumber: row.customerNumber, name: row.name })),
     managerRecipient: manager.allowed && env.MSG91_MARKETING_COPY_ENABLED ? manager.recipient : null,
+    managerRecipients: manager.allowed && env.MSG91_MARKETING_COPY_ENABLED ? manager.recipients : [],
     managerReason: !env.MSG91_MARKETING_COPY_ENABLED ? 'Manager copies are disabled' : manager.allowed ? null : manager.reason,
     blocker: canEnable ? null : !phone || !PHONE_PATTERN.test(phone) ? 'SAP has no valid phone number' :
       'Dashboard onboarding is not enabled on the server',

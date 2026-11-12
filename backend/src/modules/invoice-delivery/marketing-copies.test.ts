@@ -32,6 +32,17 @@ describe('independent marketing manager copies', () => {
     const payload = buildMsg91PaymentReminderPayload({ recipient, customerName: 'Customer One', outstandingAmount: '500.00', billingDocument: '9001', billingDocumentDate: '13 Oct 2026', teamName: 'SuryaDev' });
     assert.equal(buildMarketingCopyPayload(payload, recipient), null);
   });
+  it('builds an independent copy for each of two managers without touching the original or each other', () => {
+    const original = buildMsg91PaymentReminderPayload({ recipient: '917019339764', customerName: 'Customer One', outstandingAmount: '500.00', billingDocument: '9001', billingDocumentDate: '13 Oct 2026', teamName: 'SuryaDev' });
+    const snapshot = structuredClone(original);
+    const first = buildMarketingCopyPayload(original, recipient)!;
+    const second = buildMarketingCopyPayload(original, '918778745585')!;
+    assert.deepEqual(first.payload.template.to_and_components[0]!.to, [recipient]);
+    assert.deepEqual(second.payload.template.to_and_components[0]!.to, ['918778745585']);
+    assert.deepEqual(original, snapshot);
+    first.payload.template.to_and_components[0]!.components.body_1!.value = 'changed';
+    assert.equal(second.payload.template.to_and_components[0]!.components.body_1!.value, 'Customer One');
+  });
   it('rejects an invalid manager number', () => {
     assert.throws(() => buildMarketingCopyPayload({}, 'invalid'), /Invalid marketing copy recipient/);
   });

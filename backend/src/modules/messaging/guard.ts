@@ -98,19 +98,22 @@ export async function documentPollBlocker(candidate: {
   }
 }
 
-/** Recipient for a customer's manager copy, or null (no copy) with the reason. */
-export async function resolveManagerCopyRecipient(
+/** Every recipient of a customer's manager copy (empty means no copy) with the reason. */
+export async function resolveManagerCopyRecipients(
   customerNumber: string,
-): Promise<{ recipient: string | null; reason?: string }> {
+): Promise<{ recipients: string[]; reason?: string }> {
   const decision = await currentManagerCopyDecision(customerNumber);
   return decision.allowed
-    ? { recipient: decision.recipient }
-    : { recipient: null, reason: decision.reason };
+    ? { recipients: decision.recipients }
+    : { recipients: [], reason: decision.reason };
 }
 
 async function currentManagerCopyDecision(customerNumber: string, queuedRecipient?: string): Promise<ManagerCopyDecision> {
   const setting = await getCustomerSetting(customerNumber);
-  if (env.MSG91_MARKETING_COPY_SOURCE !== 'sap') return evaluateManagerCopy(currentCeilings(), setting, queuedRecipient);
+  if (env.MSG91_MARKETING_COPY_SOURCE !== 'sap') {
+    const manual = evaluateManagerCopy(currentCeilings(), setting, queuedRecipient);
+    return manual.allowed ? { allowed: true, recipient: manual.recipient, recipients: [manual.recipient], skippedAreas: 0 } : manual;
+  }
   if (!setting?.enabled) return { allowed: false, reason: 'customer is not enabled in Settings' };
   try {
     const assignments = await readCurrentSapManagerAssignments(customerNumber);

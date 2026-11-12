@@ -639,7 +639,7 @@ export type MessagingCustomer = {
   status: 'locked' | 'not_enabled' | 'enabled' | 'phone_changed';
   setting: MessagingSetting | null;
   managerPhoneApproved: boolean;
-  managerCopy?: { source: 'manual' | 'sap'; recipient: string | null; allowed: boolean; reason: string | null };
+  managerCopy?: { source: 'manual' | 'sap'; recipient: string | null; recipients?: string[]; skippedAreas?: number; allowed: boolean; reason: string | null };
 };
 
 export type InternalRecipientRow = {
@@ -673,7 +673,7 @@ export type EligibilityResult = {
 
 export type CustomerApprovalPreview = {
   customerNumber: string; name: string; phone: string | null; canEnable: boolean;
-  documentCutoff: string; managerRecipient: string | null; managerReason: string | null; blocker: string | null;
+  documentCutoff: string; managerRecipient: string | null; managerRecipients?: string[]; managerReason: string | null; blocker: string | null;
   sharedPhoneCustomers: Array<{ customerNumber: string; name: string }>;
 };
 

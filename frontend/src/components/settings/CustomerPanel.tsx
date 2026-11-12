@@ -123,7 +123,7 @@ function Overview({
               </button>
             )}
           </div>
-          <p>A copy of every message sent to this customer also goes to their marketing manager.</p>
+          <p>A copy of every message sent to this customer also goes to their marketing manager. If SAP lists a different manager for each sales group, every one of them gets a copy.</p>
           <div className={`st-manager st-manager--${manager.kind}`}>
             <strong>{manager.title}</strong>
             {manager.detail && <span>{manager.detail}</span>}
@@ -291,7 +291,7 @@ function ConfirmMessaging({
           {preview?.blocker && <LiveNote tone="bad">{preview.blocker}</LiveNote>}
           <p>Invoices and memos for {preview?.name ?? row.name} (SAP {row.number}) will be sent only to:</p>
           <p className="st-confirm__number mono">{formatPhone(preview?.phone ?? row.phone)}</p>
-          {preview && <p>Manager copy: {preview.managerRecipient ? formatPhone(preview.managerRecipient) : preview.managerReason ?? 'No copy'}. No other customer is enabled by this approval.</p>}
+          {preview && <p>Manager copy: {preview.managerRecipient ? (preview.managerRecipients?.length ? preview.managerRecipients : [preview.managerRecipient]).map(formatPhone).join(', ') : preview.managerReason ?? 'No copy'}. No other customer is enabled by this approval.</p>}
           {preview && preview.sharedPhoneCustomers.length > 0 && <LiveNote tone="bad">
             This number is also on {preview.sharedPhoneCustomers.length} other SAP customer record(s): {preview.sharedPhoneCustomers.slice(0, 10).map(item => `${item.name} (${item.customerNumber})`).join(', ')}.
           </LiveNote>}
