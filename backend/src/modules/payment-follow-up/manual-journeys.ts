@@ -39,49 +39,54 @@ export async function listEligiblePaymentInvoices() {
   ]);
   if (customers.error || customers.data?.length === 10000) throw new Error('Unable to read customer names');
   const names = new Map((customers.data??[]).map(row=>[row.sap_customer_number,row.display_name]));
-  const existing = new Map<string, {customers: unknown;payment_follow_up_cases: unknown;invoice_receivables: unknown;communication_jobs: unknown}>();
+  const enabled = new Map(settings.filter(row => row.enabled && row.approvedPhone && row.enabledAt).map(row => [row.sapCustomerNumber, row]));
+  type Prior = {sap_billing_document:string;customers: unknown;payment_follow_up_cases: unknown;invoice_receivables: unknown;communication_jobs: unknown};
+  // Start from invoices this app already delivered; only those can be eligible, so SAP is asked about
+  // just them instead of every invoice of every enabled customer (that took over 30 seconds).
+  const candidates: Array<{prior: Prior; customerNumber: string}> = [];
   for (let offset=0; ; offset+=500) {
     if (offset>=10000) throw new Error('Existing invoice discovery exceeds its safety limit');
-    const page = await client.from('invoices').select('id,sap_billing_document,customers!invoices_sold_to_customer_id_fkey(display_name),payment_follow_up_cases(id),invoice_receivables(payment_status,outstanding_amount),communication_jobs!communication_jobs_primary_invoice_id_fkey(job_type,status,messages(status))')
+    const page = await client.from('invoices').select('id,sap_billing_document,customers!invoices_sold_to_customer_id_fkey(display_name,sap_customer_number),payment_follow_up_cases(id),invoice_receivables(payment_status,outstanding_amount),communication_jobs!communication_jobs_primary_invoice_id_fkey(job_type,status,messages(status))')
       .order('id').range(offset,offset+499);
     if (page.error) throw new Error('Unable to verify the complete existing journey list');
-    for (const row of page.data ?? []) existing.set(row.sap_billing_document,row);
+    for (const row of (page.data ?? []) as unknown as Prior[]) {
+      const owner = Array.isArray(row.customers) ? row.customers[0] : row.customers as { sap_customer_number?: string } | null;
+      const customerNumber = owner?.sap_customer_number;
+      if (!customerNumber || !enabled.has(customerNumber) || !wasDeliveredToCustomer(row.communication_jobs)) continue;
+      const cases = row.payment_follow_up_cases;
+      if (Array.isArray(cases) ? cases.length > 0 : Boolean(cases)) continue;
+      const balances = row.invoice_receivables as {payment_status:string;outstanding_amount:number} | {payment_status:string;outstanding_amount:number}[] | undefined;
+      const balance = Array.isArray(balances) ? balances[0] : balances;
+      if (balance && (Number(balance.outstanding_amount) <= 0 || ['paid','written_off','cancelled'].includes(balance.payment_status))) continue;
+      candidates.push({ prior: row, customerNumber });
+    }
     if ((page.data?.length ?? 0)<500) break;
   }
   const sap = new SapODataClient();
   const eligible = [];
-  for (const customer of settings.filter(row => row.enabled && row.approvedPhone && row.enabledAt)) {
-    for (let skip = 0; ; skip += 500) {
-      if (skip >= 10000) throw new Error('SAP invoice discovery exceeds its safety limit');
-      const headers = await sap.collection('API_BILLING_DOCUMENT_SRV', 'A_BillingDocument', {
-        filter: `SoldToParty eq '${escapeODataString(customer.sapCustomerNumber)}' and BillingDocumentType eq 'F2' and BillingDocumentDate ge datetime'2026-10-20T00:00:00'`,
-        top: 500, skip, orderBy: 'BillingDocument asc',
+  const today = todayInIndia();
+  for (let start = 0; start < candidates.length; start += 5) {
+    const results = await Promise.all(candidates.slice(start, start + 5).map(async ({ prior, customerNumber }) => {
+      const customer = enabled.get(customerNumber)!;
+      const number = prior.sap_billing_document;
+      const [header] = await sap.collection('API_BILLING_DOCUMENT_SRV', 'A_BillingDocument', {
+        filter: `BillingDocument eq '${escapeODataString(number)}' and BillingDocumentType eq 'F2' and BillingDocumentDate ge datetime'2026-10-20T00:00:00'`, top: 1,
       });
-      for (const header of headers) {
-        const number = String(header.BillingDocument);
-        const prior = existing.get(number);
-        // Only chase payment for an invoice the customer actually received.
-        if (!prior || !wasDeliveredToCustomer(prior.communication_jobs)) continue;
-        const cases = prior?.payment_follow_up_cases;
-        const balances = prior?.invoice_receivables as {payment_status:string;outstanding_amount:number} | {payment_status:string;outstanding_amount:number}[] | undefined;
-        if (Array.isArray(cases) ? cases.length > 0 : Boolean(cases)) continue;
-        const balance = Array.isArray(balances) ? balances[0] : balances;
-        if (balance && (Number(balance.outstanding_amount) <= 0 || ['paid','written_off','cancelled'].includes(balance.payment_status))) continue;
-        const date = sapDateOnly(header.BillingDocumentDate);
-        const created = combineSapDateAndTime(header.CreationDate, header.CreationTime);
-        if (documentDateBlocker({ documentDate: date, documentCreatedAt: created }, customer.enabledAt)) continue;
-        const due = paymentDueDate(date, rules.dueDays);
-        if (due > todayInIndia() || header.BillingDocumentIsCancelled === true || header.BillingDocumentIsCancelled === 'true' || header.CancelledBillingDocument || header.TransactionCurrency !== 'INR') continue;
-        const items = await sap.collection('API_BILLING_DOCUMENT_SRV', 'A_BillingDocumentItem', { filter: `BillingDocument eq '${escapeODataString(number)}'`, top: 1000 });
-        if (items.length >= 1000) throw new Error('Unable to inspect all material lines');
-        if (materialItemsBlocker(items.map(row => ({ itemNumber: String(row.BillingDocumentItem), productId: String(row.Material ?? ''), rawData: row })), materialState)) continue;
-        const name = Array.isArray(prior?.customers) ? prior.customers[0]?.display_name : (prior?.customers as { display_name?: string } | undefined)?.display_name;
-        eligible.push({ invoiceNumber: number, customerNumber: customer.sapCustomerNumber, customerName: name ?? names.get(customer.sapCustomerNumber) ?? customer.sapCustomerNumber,
-          invoiceDate: date, dueDate: due, dueDays: rules.dueDays, amount: Number(header.TotalGrossAmount), currency: String(header.TransactionCurrency),
-          paymentStatus: 'unverified', recipient: customer.approvedPhone });
-      }
-      if (headers.length < 500) break;
-    }
+      if (!header) return null;
+      const date = sapDateOnly(header.BillingDocumentDate);
+      const created = combineSapDateAndTime(header.CreationDate, header.CreationTime);
+      if (documentDateBlocker({ documentDate: date, documentCreatedAt: created }, customer.enabledAt)) return null;
+      const due = paymentDueDate(date, rules.dueDays);
+      if (due > today || header.BillingDocumentIsCancelled === true || header.BillingDocumentIsCancelled === 'true' || header.CancelledBillingDocument || header.TransactionCurrency !== 'INR') return null;
+      const items = await sap.collection('API_BILLING_DOCUMENT_SRV', 'A_BillingDocumentItem', { filter: `BillingDocument eq '${escapeODataString(number)}'`, top: 1000 });
+      if (items.length >= 1000) throw new Error('Unable to inspect all material lines');
+      if (materialItemsBlocker(items.map(row => ({ itemNumber: String(row.BillingDocumentItem), productId: String(row.Material ?? ''), rawData: row })), materialState)) return null;
+      const name = Array.isArray(prior.customers) ? prior.customers[0]?.display_name : (prior.customers as { display_name?: string } | undefined)?.display_name;
+      return { invoiceNumber: number, customerNumber, customerName: name ?? names.get(customerNumber) ?? customerNumber,
+        invoiceDate: date, dueDate: due, dueDays: rules.dueDays, amount: Number(header.TotalGrossAmount), currency: String(header.TransactionCurrency),
+        paymentStatus: 'unverified' as const, recipient: customer.approvedPhone };
+    }));
+    for (const row of results) if (row) eligible.push(row);
   }
   return [...new Map(eligible.map(row=>[row.invoiceNumber,row])).values()].sort((a,b) => a.dueDate.localeCompare(b.dueDate) || a.invoiceNumber.localeCompare(b.invoiceNumber));
 }

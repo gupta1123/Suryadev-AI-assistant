@@ -36,18 +36,24 @@ it('eligible discovery is read-only and excludes paid, started, future, pre-cuto
     ]);
     if(path.includes('system_settings'))return Response.json({settings:{payment_reminders:{dueDays:3,firstReminderDelaySeconds:120,repeatReminderDelaySeconds:180,maximumReminders:3},tmt_material_controls:{version:1,materials:{}}}});
     if(path.endsWith('/customers'))return Response.json([{sap_customer_number:'510191',display_name:'CASTLE BUILDERS'}]);
+    const owner={display_name:'CASTLE BUILDERS',sap_customer_number:'510191'};
     if(path.endsWith('/invoices'))return Response.json([
-      {sap_billing_document:'STARTED',payment_follow_up_cases:{id:1},communication_jobs:[delivered]},
-      {sap_billing_document:'PAID',invoice_receivables:{payment_status:'paid',outstanding_amount:0},communication_jobs:[delivered]},
-      {sap_billing_document:'ELIGIBLE',communication_jobs:[{job_type:'payment_reminder',status:'completed',messages:{status:'delivered'}},delivered]},
-      {sap_billing_document:'OFF',communication_jobs:[delivered]},
-      {sap_billing_document:'FAILEDSEND',communication_jobs:[{job_type:'invoice_delivery',status:'failed',messages:{status:'failed'}}]},
+      {sap_billing_document:'STARTED',customers:owner,payment_follow_up_cases:{id:1},communication_jobs:[delivered]},
+      {sap_billing_document:'PAID',customers:owner,invoice_receivables:{payment_status:'paid',outstanding_amount:0},communication_jobs:[delivered]},
+      {sap_billing_document:'ELIGIBLE',customers:owner,communication_jobs:[{job_type:'payment_reminder',status:'completed',messages:{status:'delivered'}},delivered]},
+      {sap_billing_document:'OFF',customers:owner,communication_jobs:[delivered]},
+      {sap_billing_document:'FAILEDSEND',customers:owner,communication_jobs:[{job_type:'invoice_delivery',status:'failed',messages:{status:'failed'}}]},
     ]);
-    if(path.endsWith('/A_BillingDocument'))return Response.json({d:{results:[
+    if(path.endsWith('/A_BillingDocument')){
+      const asked=/BillingDocument eq '([^']+)'/.exec(new URL(String(input)).searchParams.get('$filter')??'')?.[1];
+      assert.ok(asked,'SAP must be asked about one named invoice, not a whole customer');
+      const all=[
       ...['ELIGIBLE','STARTED','PAID','OFF','UNSENT','FAILEDSEND'].map(BillingDocument=>({BillingDocument,BillingDocumentDate:'2026-10-24',CreationDate:'2026-10-24',CreationTime:'PT14H0M0S',TotalGrossAmount:'1000',TransactionCurrency:'INR'})),
       {BillingDocument:'OLD',BillingDocumentDate:'2026-10-19',CreationDate:'2026-10-24',CreationTime:'PT14H0M0S',TransactionCurrency:'INR'},
       {BillingDocument:'FUTURE',BillingDocumentDate:'2099-01-01',CreationDate:'2026-10-24',CreationTime:'PT14H0M0S',TransactionCurrency:'INR'},
-    ]}});
+      ];
+      return Response.json({d:{results:all.filter(row=>row.BillingDocument===asked)}});
+    }
     if(path.endsWith('/A_BillingDocumentItem'))return Response.json({d:{results:[{BillingDocumentItem:'10',Material:new URL(String(input)).searchParams.get('$filter')?.includes("'OFF'")?'30000032':'30000123'}]}});
     throw new Error('Unexpected discovery request: '+path);
   });
