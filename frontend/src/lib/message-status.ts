@@ -8,12 +8,12 @@ export type MessageStatusEvidence = {
 
 export function messageLifecycleState(
   status: string | null | undefined,
-  evidence: MessageStatusEvidence = {},
+  evidence: MessageStatusEvidence | null = {},
 ): MessageLifecycleState {
   const normalized = (status ?? '').toLowerCase();
   if (['failed', 'blocked', 'cancelled', 'rejected'].includes(normalized)) return 'failed';
-  if (normalized === 'read' || evidence.read_at) return 'read';
-  if (normalized === 'delivered' || evidence.delivered_at) return 'delivered';
-  if (['sent', 'completed', 'succeeded'].includes(normalized) || evidence.sent_at) return 'sent';
+  if (normalized === 'read' || evidence?.read_at) return 'read';
+  if (normalized === 'delivered' || evidence?.delivered_at) return 'delivered';
+  if (['sent', 'completed', 'succeeded'].includes(normalized) || evidence?.sent_at) return 'sent';
   return 'queued';
 }
