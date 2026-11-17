@@ -11,6 +11,10 @@ export type InvoiceSourceSummary = {
   customerName: string;
   amount: number;
   currency: string;
+  // Header facts known from the list call, so cheap checks can run before the heavy read.
+  customerNumber?: string;
+  billingDocumentDate?: string;
+  creationDateTime?: string | null;
 };
 
 export interface InvoiceSource {

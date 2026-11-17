@@ -10,8 +10,12 @@ import {
 import {
   claimSapPollingCheckpoint,
   finishSapPollingCheckpoint,
+  findBillingDocumentsWithDeliveryJob,
   persistInvoiceAndEnqueue,
 } from './repository.js';
+import { listCustomerSettings } from '../messaging/repository.js';
+import type { CustomerMessagingSetting } from '../messaging/policy.js';
+import type { InvoiceSourceSummary } from './invoice-source.js';
 import { SapInvoiceSource } from './sap-source.js';
 import { processDeliveryQueue } from './worker.js';
 import { isWhatsappTemplateApproved } from './msg91-client.js';
@@ -34,6 +38,9 @@ export type SapPollResult = {
   failed: number;
   lastBillingDocument?: string;
 };
+
+// A few invoices are read from SAP at once; more would risk SAP throttling.
+const POLL_CONCURRENCY = 4;
 
 let timer: NodeJS.Timeout | undefined;
 let running = false;
@@ -100,7 +107,13 @@ export async function pollSapInvoices(): Promise<SapPollResult> {
       ),
     );
 
-    for (const invoice of invoices) {
+    // Step 1: invoices already queued, sent or failed need no heavy SAP read at all.
+    const handled = await findBillingDocumentsWithDeliveryJob(invoices.map((invoice) => invoice.billingDocument));
+    const pending = invoices.filter((invoice) => !handled.has(invoice.billingDocument));
+    result.duplicates += invoices.length - pending.length;
+    const settings = new Map((await listCustomerSettings()).map((setting) => [setting.sapCustomerNumber, setting]));
+
+    const processInvoice = async (invoice: (typeof invoices)[number]): Promise<void> => {
       result.lastBillingDocument = invoice.billingDocument;
       try {
         const definition = getBillingDocumentDefinition(invoice.billingDocumentType);
@@ -109,8 +122,22 @@ export async function pollSapInvoices(): Promise<SapPollResult> {
           errors.push(
             `${invoice.billingDocument}: WhatsApp template ${definition?.templateName ?? 'unknown'} is not approved`,
           );
-          continue;
+          return;
         }
+        // Step 2: cheap checks from the list data (customer enabled, created after enabling, dates).
+        const early = earlyBlocker(invoice, invoice.customerNumber ? settings.get(invoice.customerNumber) : undefined);
+        if (early) {
+          result.skipped += 1;
+          return;
+        }
+        // Step 3: product settings from the line items alone, before the PDF and phone reads.
+        const itemReason = await tmtMaterialBlocker(await source.readItems(invoice.id));
+        if (itemReason) {
+          result.skipped += 1;
+          errors.push(`${invoice.billingDocument}: ${itemReason}`);
+          return;
+        }
+        // Everything below is the unchanged full check, run only for invoices that got this far.
         const candidate = await source.get(invoice.id);
         const reason = automaticDeliveryBlocker(candidate) ?? await tmtMaterialBlocker(candidate.items) ?? await documentPollBlocker({
           customerNumber: candidate.customer.customerNumber,
@@ -123,7 +150,7 @@ export async function pollSapInvoices(): Promise<SapPollResult> {
           // Routine: an older document that earlier deliveries already handled. Counted as
           // skipped, but not reported as a polling error in Settings.
           if (reason !== CREATED_BEFORE_ENABLED) errors.push(`${candidate.billingDocument}: ${reason}`);
-          continue;
+          return;
         }
         const persisted = await persistInvoiceAndEnqueue(
           candidate,
@@ -136,6 +163,9 @@ export async function pollSapInvoices(): Promise<SapPollResult> {
         result.failed += 1;
         errors.push(`${invoice.billingDocument}: ${errorMessage(error)}`);
       }
+    };
+    for (let start = 0; start < pending.length; start += POLL_CONCURRENCY) {
+      await Promise.all(pending.slice(start, start + POLL_CONCURRENCY).map(processInvoice));
     }
 
     const watermark = invoices.length
@@ -166,6 +196,24 @@ export async function pollSapInvoices(): Promise<SapPollResult> {
   } finally {
     running = false;
   }
+}
+
+/**
+ * Cheap pre-check using only data from the SAP list call. It only ever skips an invoice
+ * earlier; every invoice that passes still goes through the full unchanged checks.
+ */
+export function earlyBlocker(
+  invoice: Pick<InvoiceSourceSummary, 'billingDocumentDate' | 'creationDateTime'>,
+  setting: CustomerMessagingSetting | undefined,
+): string | null {
+  // Only the dashboard approval mode keeps customer approvals in Settings; other modes use fixed lists.
+  if (!isDashboardCustomerApprovalEnabled()) return null;
+  if (!setting?.enabled) return 'customer is not enabled in Settings';
+  if (!invoice.billingDocumentDate || !invoice.creationDateTime) return null; // not enough data here; the full check decides
+  return documentDateBlocker(
+    { documentDate: invoice.billingDocumentDate, documentCreatedAt: invoice.creationDateTime },
+    setting.enabledAt,
+  );
 }
 
 export function automaticDeliveryBlocker(

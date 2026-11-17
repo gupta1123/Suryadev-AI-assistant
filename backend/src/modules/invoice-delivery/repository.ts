@@ -164,6 +164,31 @@ export async function persistInvoiceAndEnqueue(
   }
 }
 
+/**
+ * Billing documents that already have an invoice delivery job (queued, sent or failed).
+ * The poller skips these before any heavy SAP read. Delivery jobs are keyed by invoice AND phone,
+ * so without this a changed customer phone could re-send an invoice that was already delivered.
+ * If the lookup fails nothing is skipped: the old per-job duplicate protection still applies.
+ */
+export async function findBillingDocumentsWithDeliveryJob(billingDocuments: string[]): Promise<Set<string>> {
+  const handled = new Set<string>();
+  const client = getSupabaseServerClient();
+  for (let start = 0; start < billingDocuments.length; start += 100) {
+    const chunk = billingDocuments.slice(start, start + 100);
+    const { data, error } = await client
+      .from('invoices')
+      .select('sap_billing_document,communication_jobs!communication_jobs_primary_invoice_id_fkey!inner(job_type)')
+      .in('sap_billing_document', chunk)
+      .eq('communication_jobs.job_type', 'invoice_delivery');
+    if (error) {
+      console.error('Unable to look up already delivered invoices; checking them all this round', error.message);
+      return new Set();
+    }
+    for (const row of data ?? []) handled.add(String(row.sap_billing_document));
+  }
+  return handled;
+}
+
 export async function persistControlledInvoiceResendAndEnqueue(
   candidate: InvoiceCandidate,
   recipient: string,

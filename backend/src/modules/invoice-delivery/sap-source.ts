@@ -77,8 +77,20 @@ export class SapInvoiceSource implements InvoiceSource {
           customerName: text(row.SoldToParty),
           amount: number(row.TotalGrossAmount, number(row.TotalNetAmount)),
           currency: text(row.TransactionCurrency),
+          customerNumber: text(row.SoldToParty),
+          billingDocumentDate: sapDateOnly(row.BillingDocumentDate),
+          creationDateTime: combineSapDateAndTime(row.CreationDate, row.CreationTime),
         };
       });
+  }
+
+  /** The line items alone: one small SAP read, used to check product settings before the heavy PDF read. */
+  async readItems(id: string) {
+    if (!/^[a-z0-9][a-z0-9-]{0,34}$/i.test(id)) throw new Error('Invalid SAP billing document identifier');
+    const items = await this.client.collection('API_BILLING_DOCUMENT_SRV', 'A_BillingDocumentItem', {
+      filter: `BillingDocument eq '${escapeODataString(id)}'`,
+    });
+    return items.map(normalizeItem);
   }
 
   async get(id: string): Promise<InvoiceCandidate> {
