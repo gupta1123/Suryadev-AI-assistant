@@ -13,6 +13,7 @@ import {
   UNIT_SECONDS,
   type TimeUnit,
 } from './duration';
+import { AutoRemindersCard } from './AutoReminders';
 import { paymentState, STATE_PILL } from './health';
 import { Card, LiveNote, Pill, Skeleton } from './ui';
 
@@ -53,8 +54,10 @@ export function RemindersTab({
         onEdit={() => setSavedAt(null)}
       />
 
+      <AutoRemindersCard />
+
       <p className="st-foot-note st-foot-note--plain">
-        <Lock size={13} aria-hidden="true" /> Reminders stop automatically when an invoice is marked as paid.
+        <Lock size={13} aria-hidden="true" /> Reminders stop automatically when an invoice is marked as paid, or when SAP shows it as fully paid.
       </p>
     </div>
   );

@@ -754,6 +754,10 @@ export async function scheduleNextPaymentReminderFromSentAt(
   const reminderCount = count ?? 0;
   const { data: cycleBalance, error: cycleError } = await client.from('invoice_receivables').select('raw_data').eq('raw_data->>payment_test_cycle_id', cycleId).single();
   if (cycleError) throw new Error('Unable to load frozen reminder settings');
+  // A stopped or partly-paid journey must not be revived by a "sent" status that arrives afterwards.
+  if (isRecord(cycleBalance?.raw_data) && isRecord(cycleBalance.raw_data.journey_hold)) {
+    return { duplicate: true, capped: false, nextActionAt: null };
+  }
   const reminderSettings = journeySettings(cycleBalance?.raw_data, await getReminderSettings());
   const capped = reminderCount >= reminderSettings.maximumReminders;
   const next = new Date(parsedSentAt + reminderSettings.repeatReminderDelaySeconds * 1000);
@@ -797,6 +801,7 @@ export async function markPaymentCasePaid(
   caseId: number,
   markedBy?: { id: string; username: string },
   paymentDetails: PaymentDetails = {},
+  source: 'marked_paid_in_dashboard' | 'sap_cleared' = 'marked_paid_in_dashboard',
 ): Promise<Record<string, unknown>> {
   const client = getSupabaseServerClient();
   const { data: paymentCase, error: caseError } = await client
@@ -841,7 +846,7 @@ export async function markPaymentCasePaid(
     const rawData = {
       ...(isRecord(receivable.raw_data) ? receivable.raw_data : {}),
       payment_confirmation: {
-        source: 'marked_paid_in_dashboard',
+        source,
         marked_by: markedBy?.username ?? null,
         confirmed_at: markedAt,
         outstanding_before: Number(receivable.outstanding_amount),
@@ -875,9 +880,9 @@ export async function markPaymentCasePaid(
   const [updatedCase] = await Promise.all([
     getPaymentCase(caseId),
     client.from('audit_logs').insert({
-      actor_type: 'user',
+      actor_type: source === 'sap_cleared' ? 'agent' : 'user',
       actor_user_id: auditUserId(markedBy?.id),
-      action: 'payment_marked_paid',
+      action: source === 'sap_cleared' ? 'payment_cleared_in_sap' : 'payment_marked_paid',
       entity_type: 'payment_follow_up_case',
       entity_id: String(caseId),
       before_data: {
@@ -890,10 +895,53 @@ export async function markPaymentCasePaid(
         cancelled_reminder_job_ids: (cancelledJobs ?? []).map((job) => Number(job.id)),
         payment_details: paymentDetailsForStorage(paymentDetails),
       },
-      metadata: { username: markedBy?.username ?? null },
+      metadata: { username: markedBy?.username ?? null, source },
     }),
   ]);
   return updatedCase;
+}
+
+export type JourneyHoldReason = 'partly_paid_in_sap' | 'stopped_by_user';
+
+/**
+ * Takes a running journey out of service without calling it paid. A user stop closes it; a partly-paid
+ * hold pauses it for the team to decide. The hold is also written on the receivable so every later send
+ * check and the reschedule-after-sent step see it, not just the status column.
+ */
+export async function holdPaymentCase(
+  caseId: number,
+  reason: JourneyHoldReason,
+  by: { id?: string; username: string },
+): Promise<Record<string, unknown>> {
+  const client = getSupabaseServerClient();
+  const { data: paymentCase, error: caseError } = await client.from('payment_follow_up_cases').select('id,invoice_id,status').eq('id', caseId).maybeSingle();
+  if (caseError) throw new Error(`Unable to load the payment case: ${caseError.message}`);
+  if (!paymentCase) throw new HttpError(404, 'Payment follow-up case not found');
+  if (paymentCase.status === 'resolved') throw new HttpError(409, 'This invoice is already paid, so there is nothing to stop.');
+  const { data: receivable, error: receivableError } = await client.from('invoice_receivables').select('raw_data').eq('invoice_id', paymentCase.invoice_id).maybeSingle();
+  if (receivableError || !receivable) throw new Error('Unable to read the journey before stopping it');
+  const raw = isRecord(receivable.raw_data) ? receivable.raw_data : {};
+  if (raw.manual_payment_journey !== true) throw new HttpError(409, 'Only a journey started from Payment follow-up can be stopped here.');
+  if (isRecord(raw.journey_hold)) return getPaymentCase(caseId);
+  const at = new Date().toISOString();
+  // Flag first: a reminder that is being scheduled right now must see the hold before the status changes.
+  const flagged = await client.from('invoice_receivables').update({ raw_data: { ...raw, journey_hold: { reason, at, by: by.username } } }).eq('invoice_id', paymentCase.invoice_id);
+  if (flagged.error) throw new Error(`Unable to stop the journey: ${flagged.error.message}`);
+  const { error: statusError } = await client.from('payment_follow_up_cases')
+    .update({ status: reason === 'stopped_by_user' ? 'closed' : 'paused', next_action_at: null, paused_until: null })
+    .eq('id', caseId).neq('status', 'resolved');
+  if (statusError) throw new Error(`Unable to stop payment reminders: ${statusError.message}`);
+  const { data: cancelled } = await client.from('communication_jobs')
+    .update({ status: 'cancelled', last_error: reason === 'stopped_by_user' ? 'Reminders stopped by a person' : 'Partly paid in SAP' })
+    .eq('job_type', 'payment_reminder').eq('payment_follow_up_case_id', caseId)
+    .in('status', ['pending', 'awaiting_approval', 'queued']).select('id');
+  await client.from('audit_logs').insert({
+    actor_type: by.id ? 'user' : 'agent', actor_user_id: auditUserId(by.id), action: reason === 'stopped_by_user' ? 'payment_journey_stopped' : 'payment_journey_held_partly_paid',
+    entity_type: 'payment_follow_up_case', entity_id: String(caseId),
+    before_data: { status: paymentCase.status }, after_data: { reason, cancelled_reminder_job_ids: (cancelled ?? []).map((job) => Number(job.id)) },
+    metadata: { username: by.username },
+  });
+  return getPaymentCase(caseId);
 }
 
 export async function isPaymentCaseResolved(caseId: number): Promise<boolean> {

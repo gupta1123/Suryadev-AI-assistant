@@ -6,6 +6,7 @@ import {
 } from './repository.js';
 import { getReminderSettings } from './settings.js';
 import { processPaymentFollowUpQueue } from './worker.js';
+import { runPaymentAutomationIfDue } from './automation.js';
 
 let timer: NodeJS.Timeout | undefined;
 let running = false;
@@ -35,6 +36,8 @@ export async function runPaymentFollowUpSchedule(): Promise<void> {
   if (running || !isPaymentFollowUpSchedulerConfigured || !env.PAYMENT_FOLLOW_UP_SEND_ENABLED) return;
   running = true;
   try {
+    // Fully-paid journeys are closed and automatic customers' invoices started (at most once a minute).
+    void runPaymentAutomationIfDue();
     const repaired = await repairStalledPaymentSchedules();
     if (repaired.length) {
       console.log(`Rescheduled payment reminders that were missed after delivery: cases ${repaired.join(', ')}`);

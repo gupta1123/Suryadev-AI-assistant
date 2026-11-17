@@ -48,7 +48,7 @@ it('eligible discovery is read-only and excludes paid, started, future, pre-cuto
       const asked=/BillingDocument eq '([^']+)'/.exec(new URL(String(input)).searchParams.get('$filter')??'')?.[1];
       assert.ok(asked,'SAP must be asked about one named invoice, not a whole customer');
       const all=[
-      ...['ELIGIBLE','STARTED','PAID','OFF','UNSENT','FAILEDSEND'].map(BillingDocument=>({BillingDocument,BillingDocumentDate:'2026-10-24',CreationDate:'2026-10-24',CreationTime:'PT14H0M0S',TotalGrossAmount:'1000',TransactionCurrency:'INR'})),
+      ...['ELIGIBLE','STARTED','PAID','OFF','UNSENT','FAILEDSEND'].map(BillingDocument=>({BillingDocument,InvoiceClearingStatus:'B',CustomerPaymentTerms:'Z002',BillingDocumentDate:'2026-10-24',CreationDate:'2026-10-24',CreationTime:'PT14H0M0S',TotalGrossAmount:'1000',TransactionCurrency:'INR'})),
       {BillingDocument:'OLD',BillingDocumentDate:'2026-10-19',CreationDate:'2026-10-24',CreationTime:'PT14H0M0S',TransactionCurrency:'INR'},
       {BillingDocument:'FUTURE',BillingDocumentDate:'2099-01-01',CreationDate:'2026-10-24',CreationTime:'PT14H0M0S',TransactionCurrency:'INR'},
       ];
@@ -60,14 +60,15 @@ it('eligible discovery is read-only and excludes paid, started, future, pre-cuto
   try {
     const rows=await listEligiblePaymentInvoices();
     assert.deepEqual(rows.map(row=>row.invoiceNumber),['ELIGIBLE']);
-    assert.equal(rows[0]!.paymentStatus,'unverified');
+    assert.equal(rows[0]!.payment,'partly_paid');
+    assert.equal(rows[0]!.paymentTerms,'Z002');
     assert.equal(rows[0]!.dueDate,'2026-10-27');
     assert.equal(rows[0]!.customerName,'CASTLE BUILDERS');
     assert.deepEqual(writes,[]);
   }finally{http.mock.restore();}
 });
 
-type Changes = { enabled?:boolean; status?:string; amount?:number; phone?:string; cancelled?:boolean; stopDuringSap?:boolean; source?:string; approvedRecipient?:string; tmt?:boolean; snapshot?:boolean; invoiceDate?:string };
+type Changes = { enabled?:boolean; status?:string; amount?:number; phone?:string; cancelled?:boolean; stopDuringSap?:boolean; source?:string; approvedRecipient?:string; tmt?:boolean; snapshot?:boolean; invoiceDate?:string; clearing?:string; baseline?:string; hold?:boolean };
 for (const [label,changes,allowed] of [
   ['exact approved SAP customer outside old payment-test list',{},true],
   ['disabled customer',{enabled:false},false],
@@ -83,6 +84,11 @@ for (const [label,changes,allowed] of [
   ['disabled material',{tmt:false},false],
   ['missing rules snapshot',{snapshot:false},false],
   ['pre-cutoff invoice',{invoiceDate:'2026-10-19'},false],
+  ['invoice fully paid in SAP',{clearing:'C'},false],
+  ['invoice not paid in SAP',{clearing:'A',baseline:'A'},true],
+  ['partly paid in SAP after the journey began',{clearing:'B',baseline:'A'},false],
+  ['partly paid in SAP when the journey began (amount was confirmed by a person)',{clearing:'B',baseline:'B'},true],
+  ['journey stopped or on hold',{hold:true},false],
 ] as [string,Changes,boolean][]) it(`manual dispatch checks ${label}`,async(t)=>{
   let status=changes.status??'active';
   let providerCalls=0;
@@ -90,14 +96,14 @@ for (const [label,changes,allowed] of [
     const u=new URL(String(input));
     const path=u.pathname;
     if(path.includes('payment_follow_up_cases'))return Response.json({id:1,invoice_id:2,status,resolved_at:status==='resolved'?'2026-10-27T00:00:00Z':null});
-    if(path.includes('invoice_receivables'))return Response.json({outstanding_amount:changes.amount??700,payment_status:'open',due_date:'2026-10-27',raw_data:{source:changes.source??'user_confirmed',manual_payment_journey:true,journey_case_id:1,payment_test_cycle_id:'manual-journey-1',approved_recipient:changes.approvedRecipient??'918098868251',...(changes.snapshot===false?{}:{journey_settings:{dueDays:3,firstReminderDelaySeconds:120,repeatReminderDelaySeconds:180,maximumReminders:3}})}});
+    if(path.includes('invoice_receivables'))return Response.json({outstanding_amount:changes.amount??700,payment_status:'open',due_date:'2026-10-27',raw_data:{source:changes.source??'user_confirmed',manual_payment_journey:true,journey_case_id:1,payment_test_cycle_id:'manual-journey-1',approved_recipient:changes.approvedRecipient??'918098868251',...(changes.baseline!==undefined?{sap_clearing_baseline:changes.baseline}:{}),...(changes.hold?{journey_hold:{reason:'stopped_by_user'}}:{}),...(changes.snapshot===false?{}:{journey_settings:{dueDays:3,firstReminderDelaySeconds:120,repeatReminderDelaySeconds:180,maximumReminders:3}})}});
     if(path.endsWith('/invoices'))return Response.json({id:2,sold_to_customer_id:1,sap_billing_document:'26ST000042',billing_document_type:'F2',billing_document_date:changes.invoiceDate??'2026-10-24',creation_datetime:'2026-10-24T14:00:00Z',is_cancelled:false,customers:[{sap_customer_number:'510191'}]});
     if(path.includes('customer_contacts'))return Response.json({id:1});
     if(path.includes('invoice_items'))return Response.json([{product_id:'30000123'}]);
     if(path.includes('system_settings'))return Response.json({settings:{tmt_material_controls:{version:1,materials:{'30000123':{enabled:changes.tmt??true,description:'TMT',updatedAt:'2026-10-20T00:00:00Z',updatedBy:'test'}}}}});
     if(path.includes('customer_messaging_settings'))return Response.json({sap_customer_number:'510191',enabled:changes.enabled??true,approved_phone:'918098868251',enabled_at:'2026-10-20T00:00:00Z'});
     if(path.includes('internal_test_recipients'))return Response.json(null);
-    if(path.endsWith('/A_BillingDocument')){if(changes.stopDuringSap)status='resolved';return Response.json({d:{results:[{BillingDocument:'26ST000042',SoldToParty:'510191',BillingDocumentIsCancelled:changes.cancelled??false}]}});}
+    if(path.endsWith('/A_BillingDocument')){if(changes.stopDuringSap)status='resolved';return Response.json({d:{results:[{BillingDocument:'26ST000042',SoldToParty:'510191',BillingDocumentIsCancelled:changes.cancelled??false,...(changes.clearing!==undefined?{InvoiceClearingStatus:changes.clearing}:{})}]}});}
     if(path.endsWith('/A_Customer'))return Response.json({d:{results:[{Customer:'510191'}]}});
     if(path.endsWith('/A_BusinessPartnerAddress'))return Response.json({d:{results:[{AddressID:'1'}]}});
     if(path.endsWith('/A_AddressPhoneNumber'))return Response.json({d:{results:[{PhoneNumber:changes.phone??'918098868251',IsDefaultPhoneNumber:true}]}});

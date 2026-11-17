@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../components/AppShell';
+import { EligibleInvoicePanel, PAYMENT_SHORT, PaymentPill } from '../components/EligibleInvoicePanel';
 import { FilterBar, FilterSelect, humanize, matchesSearch } from '../components/FilterBar';
 import { Modal } from '../components/Modal';
 import { SidePanel } from '../components/SidePanel';
@@ -48,11 +49,13 @@ export function PaymentFollowUpsPage({
   const [search, setSearch] = useState('');
   const [reminder, setReminder] = useState('');
   const [paymentStatus, setPaymentStatus] = useState('');
+  const [eligiblePayment, setEligiblePayment] = useState('');
   const [bucket, setBucket] = useState<Bucket>('journey');
   const [demoOpen, setDemoOpen] = useState(false);
   const [eligible, setEligible] = useState<EligiblePaymentInvoice[]>([]);
   const [eligibleError, setEligibleError] = useState('');
   const [starting, setStarting] = useState<EligiblePaymentInvoice[] | null>(null);
+  const [viewing, setViewing] = useState<EligiblePaymentInvoice | null>(null);
   const [sendingNow, setSendingNow] = useState<PaymentFollowUpCase[] | null>(null);
   const [pickedInvoices, setPickedInvoices] = useState<Set<string>>(new Set());
   const [pickedCases, setPickedCases] = useState<Set<number>>(new Set());
@@ -109,14 +112,22 @@ export function PaymentFollowUpsPage({
     && (!paymentStatus || item.receivable?.payment_status === paymentStatus)
     && matchesSearch(search, item.customer?.display_name, item.customer?.sap_customer_number, item.invoice?.sap_billing_document)),
   [visibleCases, reminder, paymentStatus, search]);
-  const eligibleFiltered = useMemo(() => eligible.filter((item) => matchesSearch(search, item.customerName, item.customerNumber, item.invoiceNumber)), [eligible, search]);
+  const eligiblePaymentOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of eligible) counts.set(item.payment, (counts.get(item.payment) ?? 0) + 1);
+    return (['not_paid', 'partly_paid', 'paid', 'unknown', 'cancelled'] as const).filter((state) => counts.has(state))
+      .map((state) => ({ value: state, label: `${PAYMENT_SHORT[state]} (${counts.get(state)})` }));
+  }, [eligible]);
+  const eligibleFiltered = useMemo(() => eligible.filter((item) =>
+    (!eligiblePayment || item.payment === eligiblePayment)
+    && matchesSearch(search, item.customerName, item.customerNumber, item.invoiceNumber)), [eligible, search, eligiblePayment]);
   const bucketCounts: Record<Bucket,number> = { journey: searched.filter((item) => !isSettled(item)).length, paid: searched.filter(isSettled).length, eligible: eligibleFiltered.length };
   const filtered = useMemo(() => searched.filter((item) => inBucket(item, bucket)), [searched, bucket]);
   const totalDue = filtered.reduce((sum, item) => sum + (isSettled(item) ? 0 : Number(item.receivable?.outstanding_amount ?? 0)), 0);
   const dueCurrency = filtered.find((item) => item.receivable)?.receivable?.currency ?? 'INR';
-  const filtersActive = Boolean(search || reminder || paymentStatus);
+  const filtersActive = Boolean(search || reminder || paymentStatus || (bucket === 'eligible' && eligiblePayment));
   const pagination = usePagination(filtered, 'payment-cases', `${search}|${reminder}|${paymentStatus}|${bucket}`);
-  const eligiblePagination = usePagination(eligibleFiltered, 'payment-eligible', search);
+  const eligiblePagination = usePagination(eligibleFiltered, 'payment-eligible', `${search}|${eligiblePayment}`);
   const canStart = !eligibleError && !refreshing && Boolean(paymentConfig?.manualJourneys && paymentConfig.sendEnabled);
   const chosenInvoices = eligible.filter((item) => pickedInvoices.has(item.invoiceNumber));
   const sendable = (item: PaymentFollowUpCase) => !isSettled(item) && item.status === 'active' && Boolean(item.next_action_at) && Date.parse(String(item.next_action_at)) > Date.now();
@@ -128,6 +139,7 @@ export function PaymentFollowUpsPage({
     setSearch('');
     setReminder('');
     setPaymentStatus('');
+    setEligiblePayment('');
   }
 
   return (
@@ -166,7 +178,6 @@ export function PaymentFollowUpsPage({
             </button>
           ))}
         </div>
-        {bucket === 'eligible' && <p className="list-summary">Eligibility uses the invoice date + {paymentConfig?.dueDays ?? 3} days, enabled customers, approved materials and an invoice already delivered to the customer. Payment is confirmed by your team, not verified from SAP. No reminders start until you choose Start journey.</p>}
         {!loading && bucket !== 'eligible' && totalDue > 0 && (
           <p className="list-summary"><strong>{formatCurrency(totalDue, dueCurrency)}</strong> still to pay across {filtered.filter((item) => !isSettled(item)).length} invoices</p>
         )}
@@ -177,6 +188,7 @@ export function PaymentFollowUpsPage({
           active={filtersActive}
           onClear={clearFilters}
         >
+          {bucket === 'eligible' && <FilterSelect label="Payment in SAP" value={eligiblePayment} options={eligiblePaymentOptions} onChange={setEligiblePayment} />}
           {bucket !== 'eligible' && <><FilterSelect label="Reminder" value={reminder} options={reminderOptions} onChange={setReminder} />
           <FilterSelect label="Payment" value={paymentStatus} options={paymentStatusOptions} onChange={setPaymentStatus} /></>}
         </FilterBar>
@@ -194,14 +206,14 @@ export function PaymentFollowUpsPage({
               <th className="select-cell"><input type="checkbox" aria-label="Select all eligible invoices" disabled={!canStart || eligibleFiltered.length === 0}
                 checked={eligibleFiltered.length > 0 && eligibleFiltered.every((item) => pickedInvoices.has(item.invoiceNumber))}
                 onChange={(event) => setPickedInvoices(event.target.checked ? new Set(eligibleFiltered.map((item) => item.invoiceNumber)) : new Set())} /></th>
-              <th>Customer</th><th>Invoice</th><th>Invoice amount</th><th>Calculated due date</th><th>Action</th></tr></thead>
-            <tbody>{eligiblePagination.pageRows.map((item) => <tr key={item.invoiceNumber}>
-              <td className="select-cell"><input type="checkbox" aria-label={`Select invoice ${item.invoiceNumber}`} disabled={!canStart}
+              <th>Customer</th><th>Invoice</th><th>Invoice amount</th><th>Payment in SAP</th><th>Calculated due date</th><th>Action</th></tr></thead>
+            <tbody>{eligiblePagination.pageRows.map((item) => <tr key={item.invoiceNumber} className="row-clickable" onClick={() => setViewing(item)}>
+              <td className="select-cell" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Select invoice ${item.invoiceNumber}`} disabled={!canStart}
                 checked={pickedInvoices.has(item.invoiceNumber)} onChange={() => setPickedInvoices((current) => toggle(current, item.invoiceNumber))} /></td>
               <td><strong>{item.customerName}</strong><small>{item.customerNumber}</small></td>
-              <td><strong>{item.invoiceNumber}</strong><small>{formatDate(item.invoiceDate)}</small></td>
-              <td>{formatCurrency(item.amount,item.currency)}</td><td>{formatDate(item.dueDate)}<small>Invoice date + {item.dueDays} days</small></td>
-              <td><button className="button button--secondary" type="button" disabled={!canStart} onClick={() => setStarting([item])}>Start journey</button></td>
+              <td><button className="row-link" type="button" aria-label={`Show details for invoice ${item.invoiceNumber}`} onClick={(event) => { event.stopPropagation(); setViewing(item); }}>{item.invoiceNumber}</button><small>{formatDate(item.invoiceDate)}</small></td>
+              <td>{formatCurrency(item.amount,item.currency)}</td><td><PaymentPill state={item.payment} /></td><td>{formatDate(item.dueDate)}<small>Invoice date + {item.dueDays} days</small></td>
+              <td onClick={(event) => event.stopPropagation()}><button className="button button--secondary" type="button" disabled={!canStart} onClick={() => setStarting([item])}>Start journey</button></td>
             </tr>)}</tbody>
           </table>{eligibleFiltered.length === 0 && <div className="empty-table"><strong>No eligible invoices</strong><p>Invoices appear here when due, once delivered to the customer, provided their customer and all materials are enabled and no journey already exists.</p></div>}</div>}
           <PaginationControls page={eligiblePagination.page} pageCount={eligiblePagination.pageCount} pageSize={eligiblePagination.pageSize} total={eligiblePagination.total} noun="invoices" disabled={refreshing} onPageChange={eligiblePagination.setPage} onPageSizeChange={eligiblePagination.setPageSize} />
@@ -247,6 +259,8 @@ export function PaymentFollowUpsPage({
           onComplete={(result) => { setDemoOpen(false); onNavigate(`/payments/${result.caseId}`); }}
         />
       )}
+      {viewing && <EligibleInvoicePanel invoice={viewing} canStart={canStart} onClose={() => setViewing(null)}
+        onStart={() => { const item = viewing; setViewing(null); setStarting([item]); }} />}
       {starting && paymentConfig && <StartJourneyPanel invoices={starting} config={paymentConfig} onClose={() => setStarting(null)}
         onFinished={async (caseId) => { setStarting(null); setPickedInvoices(new Set()); await load(true); if (caseId) onNavigate(`/payments/${caseId}`); }} />}
       {sendingNow && <SendNowPanel cases={sendingNow} onClose={() => setSendingNow(null)} onFinished={async () => { setSendingNow(null); setPickedCases(new Set()); await load(true); }} />}
@@ -431,6 +445,9 @@ export function journeyState(paymentCase: PaymentFollowUpCase): { label: string;
   const limit = paymentCase.reminder_limit ?? 0;
   const sent = limit > 0 ? `${count} of ${limit} reminders sent` : `${count} ${count === 1 ? 'reminder' : 'reminders'} sent`;
   if (isSettled(paymentCase)) return { label: 'Paid', tone: 'paid', detail: sent };
+  const hold = paymentCase.receivable?.raw_data?.journey_hold;
+  if (hold?.reason === 'partly_paid_in_sap') return { label: 'Partly paid in SAP', tone: 'paused', detail: `${sent} · needs your team` };
+  if (hold?.reason === 'stopped_by_user') return { label: 'Stopped', tone: 'paused', detail: `${sent}${hold.by ? ` · by ${hold.by}` : ''}` };
   if (paymentCase.status === 'paused' && limit > 0 && count >= limit) return { label: 'Completed', tone: 'done', detail: `${sent} · awaiting payment` };
   if (paymentCase.status === 'paused') return { label: 'Paused', tone: 'paused', detail: sent };
   return { label: 'In progress', tone: 'live', detail: sent };

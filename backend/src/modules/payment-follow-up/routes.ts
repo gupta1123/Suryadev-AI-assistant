@@ -14,6 +14,7 @@ import { type AuthenticatedRequest, requireAdmin } from '../../middleware/auth.j
 import { formatPhone } from '../invoice-delivery/policy.js';
 import {
   getPaymentCase,
+  holdPaymentCase,
   listPaymentCases,
   markPaymentCasePaid,
   preparePaymentEndToEndTest,
@@ -28,6 +29,9 @@ import {
 import { persistControlledInvoiceResendAndEnqueue } from '../invoice-delivery/repository.js';
 import { processDeliveryQueue } from '../invoice-delivery/worker.js';
 import { paymentDetailsSchema } from './payment-details.js';
+import { getEligibleInvoiceDetails, getManagerPreview } from './invoice-details.js';
+import { autoMasterSchema, getAutoSettings, saveAutoMaster, serverCanSendReminders, setAutoCustomer } from './auto-settings.js';
+import { previewAutoStart } from './automation.js';
 import { clearEligiblePaymentCache, listEligiblePaymentInvoices, sendManualRemindersNow, sendNowSchema, startJourneySchema, startManualPaymentJourney } from './manual-journeys.js';
 
 const caseIdSchema = z.coerce.number().int().positive();
@@ -105,9 +109,44 @@ paymentFollowUpRouter.post(
 paymentFollowUpRouter.get('/eligible', asyncHandler(async (_request, response) => {
   response.json({ data: await listEligiblePaymentInvoices() });
 }));
+paymentFollowUpRouter.get('/eligible/:invoiceNumber/details', asyncHandler(async (request, response) => {
+  const number = z.string().regex(/^[a-zA-Z0-9-]{1,35}$/).parse(request.params.invoiceNumber);
+  response.json({ data: await getEligibleInvoiceDetails(number) });
+}));
+paymentFollowUpRouter.get('/eligible/:invoiceNumber/managers', asyncHandler(async (request, response) => {
+  const number = z.string().regex(/^[a-zA-Z0-9-]{1,35}$/).parse(request.params.invoiceNumber);
+  response.json({ data: await getManagerPreview(number) });
+}));
 paymentFollowUpRouter.post('/journeys/:invoiceNumber/start', asyncHandler(async (request: AuthenticatedRequest, response) => {
   const number = z.string().regex(/^[a-zA-Z0-9-]{1,35}$/).parse(request.params.invoiceNumber);
   response.status(201).json({ data: await startManualPaymentJourney(number, startJourneySchema.parse(request.body), request.auth!.user.username) });
+}));
+
+const actorOf = (request: AuthenticatedRequest) => request.auth ? { id: request.auth.userId, username: request.auth.user.username } : undefined;
+const customerNumberSchema = z.string().regex(/^[A-Za-z0-9]{1,20}$/);
+
+paymentFollowUpRouter.get('/auto', asyncHandler(async (_request, response) => {
+  const settings = await getAutoSettings();
+  response.json({ data: { enabled: settings.enabled, goLiveDate: settings.goLiveDate, customers: Object.keys(settings.customers), serverCanSend: serverCanSendReminders(), updatedAt: settings.updatedAt } });
+}));
+paymentFollowUpRouter.put('/auto', asyncHandler(async (request: AuthenticatedRequest, response) => {
+  const parsed = autoMasterSchema.safeParse(request.body ?? {});
+  if (!parsed.success) throw new HttpError(400, 'Automatic reminder settings are invalid', parsed.error.issues.map((issue) => ({ label: `${issue.path.join('.')}: ${issue.message}` })));
+  if (parsed.data.enabled && !serverCanSendReminders()) throw new HttpError(409, 'Payment reminder sending is not switched on for this server, so automatic reminders cannot be turned on.');
+  const saved = await saveAutoMaster(parsed.data, actorOf(request));
+  response.json({ data: { enabled: saved.enabled, goLiveDate: saved.goLiveDate, customers: Object.keys(saved.customers), serverCanSend: serverCanSendReminders(), updatedAt: saved.updatedAt } });
+}));
+paymentFollowUpRouter.get('/auto/preview/:customerNumber', asyncHandler(async (request, response) => {
+  response.json({ data: await previewAutoStart(customerNumberSchema.parse(request.params.customerNumber)) });
+}));
+paymentFollowUpRouter.put('/auto/customers/:customerNumber', asyncHandler(async (request: AuthenticatedRequest, response) => {
+  const body = z.object({ enabled: z.boolean() }).strict().parse(request.body ?? {});
+  const saved = await setAutoCustomer(customerNumberSchema.parse(request.params.customerNumber), body.enabled, actorOf(request));
+  response.json({ data: { enabled: saved.enabled, goLiveDate: saved.goLiveDate, customers: Object.keys(saved.customers) } });
+}));
+paymentFollowUpRouter.post('/cases/:caseId/stop', asyncHandler(async (request: AuthenticatedRequest, response) => {
+  const caseId = caseIdSchema.parse(request.params.caseId);
+  response.json({ data: await holdPaymentCase(caseId, 'stopped_by_user', { id: request.auth?.userId ?? '', username: request.auth?.user.username ?? 'admin' }) });
 }));
 
 paymentFollowUpRouter.post('/cases/send-now', asyncHandler(async (request: AuthenticatedRequest, response) => {

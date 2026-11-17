@@ -12,6 +12,7 @@ import { assertDocumentSendAllowed } from '../messaging/guard.js';
 import { getReminderSettings } from './settings.js';
 import { paymentDueDate, todayInIndia } from './policy.js';
 import { isPaymentReminderTemplateApproved } from '../invoice-delivery/msg91-client.js';
+import { clearingLetter, paymentStateFromSap, sapFactsFromHeader } from './payment-status.js';
 
 export const startJourneySchema = z.object({
   confirmedUnpaid: z.literal(true), outstandingAmount: z.number().finite().positive().multipleOf(0.01),
@@ -81,10 +82,12 @@ async function discoverEligiblePaymentInvoices() {
       const items = await sap.collection('API_BILLING_DOCUMENT_SRV', 'A_BillingDocumentItem', { filter: `BillingDocument eq '${escapeODataString(number)}'`, top: 1000 });
       if (items.length >= 1000) throw new Error('Unable to inspect all material lines');
       if (materialItemsBlocker(items.map(row => ({ itemNumber: String(row.BillingDocumentItem), productId: String(row.Material ?? ''), rawData: row })), materialState)) return null;
+      const sapFacts = sapFactsFromHeader(header, created);
       const name = Array.isArray(prior.customers) ? prior.customers[0]?.display_name : (prior.customers as { display_name?: string } | undefined)?.display_name;
       return { invoiceNumber: number, customerNumber, customerName: name ?? names.get(customerNumber) ?? customerNumber,
         invoiceDate: date, dueDate: due, dueDays: rules.dueDays, amount: Number(header.TotalGrossAmount), currency: String(header.TransactionCurrency),
-        paymentStatus: 'unverified' as const, recipient: customer.approvedPhone };
+        payment: sapFacts.state, paymentTerms: sapFacts.paymentTerms, createdAt: sapFacts.createdAt,
+        sap: sapFacts, recipient: customer.approvedPhone };
     }));
     for (const row of results) if (row) eligible.push(row);
   }
@@ -116,6 +119,12 @@ export async function listEligiblePaymentInvoices(): Promise<EligibleRows> {
   return eligibleRefresh;
 }
 
+/** The row for one invoice from the most recent eligible list (at most a few minutes old), or null. */
+export function cachedEligibleRow(invoiceNumber: string): EligibleRows[number] | null {
+  if (!eligibleCache || Date.now() - eligibleCache.at >= ELIGIBLE_STALE_MS) return null;
+  return eligibleCache.rows.find((row) => row.invoiceNumber === invoiceNumber) ?? null;
+}
+
 export function clearEligiblePaymentCache() {
   eligibleCache = null;
   eligibleGeneration += 1;
@@ -138,6 +147,9 @@ export async function startManualPaymentJourney(number: string, input: z.infer<t
     throw error;
   });
   if (candidate.billingDocumentType !== 'F2' || candidate.isCancelled || candidate.currency !== 'INR' || paymentDueDate(candidate.billingDocumentDate, rules.dueDays) > todayInIndia()) throw new HttpError(409, 'Invoice is cancelled, not due, or not an eligible INR invoice');
+  const sapHeader = (candidate.rawData.billingDocument ?? {}) as Record<string, unknown>;
+  const sapPayment = paymentStateFromSap(sapHeader);
+  if (sapPayment.state === 'paid') throw new HttpError(409, `SAP shows invoice ${number} as fully paid, so reminders can't be started for it.`);
   if (input.outstandingAmount > candidate.totalGrossAmount) throw new HttpError(400, 'Outstanding balance cannot exceed the invoice total');
   const materialBlocker = await tmtMaterialBlocker(candidate.items);
   if (materialBlocker) throw new HttpError(409, materialBlocker);
@@ -156,6 +168,12 @@ export async function startManualPaymentJourney(number: string, input: z.infer<t
   });
   if (error) throw new HttpError(error.code === 'PGRST202' ? 503 : 409, error.code === 'PGRST202' ? 'The manual payment journey SQL migration must be applied before starting journeys.' : error.message);
   clearEligiblePaymentCache();
+  // Remember SAP's status at the start, so a payment that arrives later can be told apart from one that was already there.
+  const stored = await client.from('invoice_receivables').select('raw_data').eq('invoice_id', invoice.invoiceId).maybeSingle();
+  const storedRaw = stored.data?.raw_data;
+  if (storedRaw && typeof storedRaw === 'object' && !Array.isArray(storedRaw)) {
+    await client.from('invoice_receivables').update({ raw_data: { ...storedRaw, sap_clearing_baseline: clearingLetter(sapHeader) } }).eq('invoice_id', invoice.invoiceId);
+  }
   return { caseId: Number(data) };
 }
 

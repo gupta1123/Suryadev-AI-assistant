@@ -4,6 +4,7 @@ import { assertInvoiceTmtAllowed } from '../messaging/tmt-materials.js';
 import { SapODataClient, escapeODataString } from '../invoice-delivery/sap-client.js';
 import { paymentDueDate, todayInIndia } from './policy.js';
 import { journeySettings, defaultReminderSettings } from './settings.js';
+import { clearingLetter, paymentStateFromSap } from './payment-status.js';
 
 /** Fresh database + SAP gates. A job's manual flag alone is never permission. */
 export async function assertManualJourneyAllowed(caseId: number, invoiceId: number, recipient: string, cycleId: string, amount?: number): Promise<void> {
@@ -21,6 +22,7 @@ export async function assertManualJourneyAllowed(caseId: number, invoiceId: numb
     raw.approved_recipient !== recipient || !raw.journey_settings || raw.source !== 'user_confirmed') throw new Error('Manual journey is stopped, paid, or no longer matches this reminder');
   if (['paid','cancelled','written_off','disputed'].includes(balance.payment_status) || Number(balance.outstanding_amount) <= 0 ||
     (amount !== undefined && Number(balance.outstanding_amount) !== amount)) throw new Error('Outstanding balance changed or invoice is closed; sending is blocked');
+  if (raw.journey_hold) throw new Error('This journey was stopped or put on hold; reminders are blocked');
   const rules = journeySettings(raw, defaultReminderSettings());
   if (balance.due_date !== paymentDueDate(invoice.billing_document_date, rules.dueDays) || balance.due_date > todayInIndia()) throw new Error('Invoice is not due under this journey’s frozen rules');
   if (invoice.billing_document_type !== 'F2' || invoice.is_cancelled) throw new Error('Invoice is cancelled or unsupported');
@@ -32,6 +34,10 @@ export async function assertManualJourneyAllowed(caseId: number, invoiceId: numb
   const header = live[0];
   if (!header || header.BillingDocumentIsCancelled === true || header.BillingDocumentIsCancelled === 'true' || header.CancelledBillingDocument ||
     String(header.SoldToParty) !== customer.sap_customer_number) throw new Error('SAP invoice is missing, cancelled, or belongs to another customer');
+  const sap = paymentStateFromSap(header);
+  if (sap.state === 'paid') throw new Error('SAP shows this invoice as fully paid; reminders are blocked');
+  // Partly paid is only a problem when it happened after the journey began: the amount in the message is then out of date.
+  if (sap.state === 'partly_paid' && raw.sap_clearing_baseline === 'A' && clearingLetter(header) === 'B') throw new Error('SAP now shows this invoice as partly paid; reminders are blocked');
   const route = await assertDocumentSendAllowed({ source:'sap',customerNumber:customer.sap_customer_number,recipient,
     documentDate:invoice.billing_document_date,documentCreatedAt:invoice.creation_datetime });
   if (route !== 'customer') throw new Error('Manual reminder must target the customer’s exact approved phone');

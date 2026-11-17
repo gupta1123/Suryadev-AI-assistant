@@ -483,6 +483,8 @@ export type PaymentFollowUpCase = {
       confirmed_by?: string;
       confirmed_at?: string;
       journey_settings?: ReminderSettings;
+      sap_clearing_baseline?: string;
+      journey_hold?: { reason: 'partly_paid_in_sap' | 'stopped_by_user'; at: string; by?: string | null };
       payment_confirmation?: {
         source: string;
         marked_by?: string | null;
@@ -504,7 +506,31 @@ export type PaymentFollowUpCase = {
 export type EligiblePaymentInvoice = {
   invoiceNumber: string; customerNumber: string; customerName: string;
   invoiceDate: string; dueDate: string; dueDays: number; amount: number; currency: string;
-  paymentStatus: 'unverified'; recipient: string;
+  payment: PaymentState; paymentTerms: string | null; createdAt: string | null; recipient: string;
+};
+
+export type PaymentState = 'not_paid' | 'partly_paid' | 'paid' | 'cancelled' | 'unknown' | 'unavailable';
+
+export type AutoReminderState = { enabled: boolean; goLiveDate: string | null; customers: string[]; serverCanSend: boolean; updatedAt?: string | null };
+
+export type AutoPreview = {
+  masterOn: boolean; goLiveDate: string | null; alreadyAutomatic: boolean; serverCanSend: boolean; toLast4: string | null;
+  timing: { dueDays: number; firstDelaySeconds: number; repeatDelaySeconds: number; maximum: number };
+  wouldStart: Array<{ invoiceNumber: string; invoiceDate: string; dueDate: string; amount: number; currency: string }>;
+  skipped: Array<{ invoiceNumber: string; invoiceDate: string; amount: number; currency: string; reason: string }>;
+};
+
+export type EligibleManagers = { enabled: boolean; last4: string[]; reason: string | null };
+
+export type EligibleInvoiceDetails = {
+  invoiceNumber: string; customerName: string; customerNumber: string;
+  invoiceDate: string; createdAt: string | null; amount: number; currency: string;
+  dueDate: string; dueDays: number; daysPastDue: number;
+  payment: { state: PaymentState; label: string; clearingStatus: string | null; paymentTerms: string | null };
+  delivery: { delivered: boolean; status: string | null; sentAt: string | null; deliveredAt: string | null; readAt: string | null; toLast4: string | null; attempts: number };
+  items: Array<{ number: string; productId: string; description: string | null; quantity: number | null; unit: string | null; amount: number | null; batches: string[]; enabled: boolean }>;
+  reminders: { firstDelaySeconds: number; repeatDelaySeconds: number; maximum: number; toLast4: string | null };
+  checks: Array<{ key: string; label: string; state: 'pass' | 'fail' | 'warn' | 'unknown'; detail: string }>;
 };
 
 export type MarketingCopyInfo = {

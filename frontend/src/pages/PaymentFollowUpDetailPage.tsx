@@ -1,4 +1,4 @@
-import { AlertCircle, BadgeIndianRupee, BellRing, Check, CircleCheck, Clock3, RotateCcw, X } from 'lucide-react';
+import { AlertCircle, BadgeIndianRupee, BellRing, Check, CircleCheck, Clock3, OctagonX, RotateCcw, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { BackLink } from '../components/BackLink';
@@ -8,6 +8,7 @@ import { apiRequest } from '../lib/api';
 import { formatCurrency, formatDate, formatDateTime, toMessage } from '../lib/format';
 import { messageLifecycleState, type MessageLifecycleState } from '../lib/message-status';
 import { MarketingCopyStatus } from '../components/MarketingCopyStatus';
+import { ReminderText } from '../components/ReminderText';
 import {
   relationOne,
   type AdminUser,
@@ -64,6 +65,9 @@ export function PaymentFollowUpDetailPage({
   const [restarting, setRestarting] = useState(false);
   const [restartError, setRestartError] = useState('');
   const [restartNotice, setRestartNotice] = useState(false);
+  const [confirmingStop, setConfirmingStop] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [stopError, setStopError] = useState('');
   const loadInFlight = useRef(false);
 
   const load = useCallback(async () => {
@@ -145,6 +149,19 @@ export function PaymentFollowUpDetailPage({
     }
   }
 
+  async function stopReminders() {
+    setStopping(true);
+    setStopError('');
+    try {
+      setPaymentCase(await apiRequest<PaymentFollowUpCase>(`/payment-follow-up/cases/${caseId}/stop`, { method: 'POST', body: JSON.stringify({}) }));
+      setConfirmingStop(false);
+    } catch (stopFailure) {
+      setStopError(toMessage(stopFailure));
+    } finally {
+      setStopping(false);
+    }
+  }
+
   function openMarkPaid() {
     setMarkPaidError('');
     setPaymentDetails(emptyPaymentDetails());
@@ -172,12 +189,16 @@ export function PaymentFollowUpDetailPage({
   const untilDue = daysUntil(dueDate);
   const nextReminderAt = paymentCase?.next_action_at ?? null;
   const markedInDashboard = confirmation?.source === 'marked_paid_in_dashboard';
+  const clearedInSap = confirmation?.source === 'sap_cleared';
+  const hold = receivable?.raw_data?.journey_hold;
+  const canStop = !settled && !hold && receivable?.raw_data?.manual_payment_journey === true;
 
   const tone: PageTone = settled
     ? 'paid'
     : daysOverdue > 30 ? 'critical' : daysOverdue > 0 ? 'late' : receivable?.aging_bucket === 'due' ? 'due' : 'calm';
   const pill = settled
-    ? (markedInDashboard ? 'Marked as paid' : 'Paid in full')
+    ? (markedInDashboard ? 'Marked as paid' : clearedInSap ? 'Paid in SAP' : 'Paid in full')
+    : hold ? (hold.reason === 'partly_paid_in_sap' ? 'Partly paid in SAP · paused' : 'Reminders stopped')
     : daysOverdue > 0
       ? `Overdue · ${daysOverdue} ${daysOverdue === 1 ? 'day' : 'days'}`
       : tone === 'due'
@@ -187,7 +208,10 @@ export function PaymentFollowUpDetailPage({
   const heroDetail = settled
     ? markedInDashboard
       ? `Recorded${confirmation?.marked_by ? ` by ${confirmation.marked_by}` : ''} on ${formatDateTime(confirmation?.confirmed_at)}`
+      : clearedInSap ? `SAP showed this invoice as fully paid on ${formatDateTime(confirmation?.confirmed_at)}. Reminders stopped.`
       : 'The full amount has been received'
+    : hold?.reason === 'partly_paid_in_sap' ? 'SAP shows part of this invoice as paid. Reminders are paused until your team decides.'
+    : hold ? `Stopped${hold.by ? ` by ${hold.by}` : ''} on ${formatDateTime(hold.at)}. No more reminders will be sent.`
     : dueDate ? `${daysOverdue > 0 ? 'Was due' : 'Due'} on ${formatDate(dueDate)}` : 'No due date set yet';
   const initials = (customer?.display_name ?? '?').split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]?.toUpperCase()).join('');
 
@@ -299,6 +323,11 @@ export function PaymentFollowUpDetailPage({
                   <span className="pf-pill"><i aria-hidden="true" />{pill}</span>
                   {(!settled || paymentCase.restartable) && (
                     <div className="pf-actions">
+                      {canStop && (
+                        <button className="pf-btn pf-btn--ghost" type="button" onClick={() => { setStopError(''); setConfirmingStop(true); }}>
+                          <OctagonX size={14} aria-hidden="true" /> Stop reminders
+                        </button>
+                      )}
                       {!settled && (
                         <button className="pf-btn pf-btn--solid" type="button" onClick={openMarkPaid}>
                           <CircleCheck size={14} aria-hidden="true" /> Mark as paid
@@ -501,6 +530,25 @@ export function PaymentFollowUpDetailPage({
           </div>
         </Modal>
       )}
+      {confirmingStop && paymentCase && (
+        <Modal
+          title="Stop reminders for this invoice?"
+          description="No more reminders will be sent and any waiting reminder is cancelled. The invoice is not marked as paid, and this can't be undone here. A reminder already handed to WhatsApp cannot be recalled."
+          onClose={() => { if (!stopping) setConfirmingStop(false); }}
+        >
+          <dl className="pf-recap">
+            <div><dt>Customer</dt><dd>{customer?.display_name ?? '—'}</dd></div>
+            <div><dt>Invoice</dt><dd>{invoiceNumber ?? '—'}</dd></div>
+          </dl>
+          {stopError && <div className="alert alert--error">{stopError}</div>}
+          <div className="modal-footer">
+            <button className="button button--secondary" type="button" disabled={stopping} onClick={() => setConfirmingStop(false)}>Cancel</button>
+            <button className="button button--danger" type="button" disabled={stopping} onClick={() => void stopReminders()}>
+              <OctagonX size={15} aria-hidden="true" /> {stopping ? 'Stopping…' : 'Stop reminders'}
+            </button>
+          </div>
+        </Modal>
+      )}
       {confirmingRestart && paymentCase && (
         <Modal
           title="Restart reminders for this invoice?"
@@ -591,17 +639,3 @@ function daysUntil(date?: string | null): number | null {
   return Number.isNaN(due) ? null : Math.round((due - today) / 86_400_000);
 }
 
-// The text the customer receives: WhatsApp template "payment_reminder_v3" (English), filled with the
-// same values the backend sends. Keep in step with the approved template in MSG91.
-function ReminderText({ customerName, amount, invoiceNumber, invoiceDate }: {
-  customerName?: string | undefined; amount: number; invoiceNumber?: string | undefined; invoiceDate?: string | null | undefined;
-}) {
-  const money = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
-  return (
-    <p className="pf-template">
-      {`Hello ${customerName ?? 'Customer'},\n\nThis is a payment reminder for `}<strong>₹{money}</strong>{' pending against invoice '}<strong>{invoiceNumber ?? ''}</strong>
-      {' dated '}<strong>{formatDate(invoiceDate)}</strong>
-      {'.\n\nPlease arrange payment at your earliest convenience. If payment is not made on or before the due date, interest will be levied at 24% per annum. If payment has already been made, please ignore this message.\n\nRegards,\nSuryadev Alloys and Power Private Limited'}
-    </p>
-  );
-}

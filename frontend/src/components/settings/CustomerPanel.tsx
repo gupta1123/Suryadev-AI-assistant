@@ -5,9 +5,10 @@ import { formatDateTime, formatPhone, toMessage } from '../../lib/format';
 import type { EligibilityResult, CustomerApprovalPreview } from '../../types';
 import { Modal } from '../Modal';
 import { managerSummary, STATUS_PILL, type CustomerRow } from './customer-rows';
+import { AutoReminderConfirm, AutoReminderSection } from './AutoReminders';
 import { LiveNote, Pill } from './ui';
 
-export type PanelView = 'overview' | 'enable' | 'disable' | 'manager';
+export type PanelView = 'overview' | 'enable' | 'disable' | 'manager' | 'auto';
 
 export function CustomerPanel({
   row,
@@ -41,6 +42,9 @@ export function CustomerPanel({
           onBack={() => setView('overview')}
           onDone={() => finished(view === 'enable' ? 'Messaging is on for this customer.' : 'Messaging is off for this customer.')}
         />
+      )}
+      {view === 'auto' && (
+        <AutoReminderConfirm customerNumber={row.number} customerName={row.name} onBack={() => setView('overview')} onDone={(message) => finished(message)} />
       )}
       {view === 'manager' && (
         <ManagerForm row={row} onBack={() => setView('overview')} onDone={(message) => finished(message)} />
@@ -110,6 +114,8 @@ function Overview({
         </div>
         {row.status === 'nophone' && <p className="st-hint">SAP has no phone number for this customer, so it can’t be turned on.</p>}
       </section>
+
+      {row.status === 'enabled' && <AutoReminderSection customerNumber={row.number} revision={revision} onOpen={() => onView('auto')} />}
 
       {canManage && <Eligibility key={`${row.number}-${row.status}-${revision}`} customerNumber={row.number} />}
 
