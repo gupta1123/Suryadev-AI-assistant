@@ -28,7 +28,7 @@ import {
 import { persistControlledInvoiceResendAndEnqueue } from '../invoice-delivery/repository.js';
 import { processDeliveryQueue } from '../invoice-delivery/worker.js';
 import { paymentDetailsSchema } from './payment-details.js';
-import { listEligiblePaymentInvoices, sendManualRemindersNow, sendNowSchema, startJourneySchema, startManualPaymentJourney } from './manual-journeys.js';
+import { clearEligiblePaymentCache, listEligiblePaymentInvoices, sendManualRemindersNow, sendNowSchema, startJourneySchema, startManualPaymentJourney } from './manual-journeys.js';
 
 const caseIdSchema = z.coerce.number().int().positive();
 
@@ -77,12 +77,13 @@ paymentFollowUpRouter.put(
         parsed.error.issues.map((issue) => ({ label: `${issue.path.join('.')}: ${issue.message}` })),
       );
     }
-    response.json({
-      data: await saveReminderSettings(
-        parsed.data,
-        request.auth ? { id: request.auth.userId, username: request.auth.user.username } : undefined,
-      ),
-    });
+    const saved = await saveReminderSettings(
+      parsed.data,
+      request.auth ? { id: request.auth.userId, username: request.auth.user.username } : undefined,
+    );
+    // The eligible list depends on "due after" days, so a copy built under the old value must not be reused.
+    clearEligiblePaymentCache();
+    response.json({ data: saved });
   }),
 );
 

@@ -94,6 +94,7 @@ async function discoverEligiblePaymentInvoices() {
 type EligibleRows = Awaited<ReturnType<typeof discoverEligiblePaymentInvoices>>;
 let eligibleCache: { rows: EligibleRows; at: number } | null = null;
 let eligibleRefresh: Promise<EligibleRows> | null = null;
+let eligibleGeneration = 0;
 const ELIGIBLE_FRESH_MS = 60_000;
 const ELIGIBLE_STALE_MS = 180_000;
 
@@ -102,17 +103,24 @@ export async function listEligiblePaymentInvoices(): Promise<EligibleRows> {
   const age = eligibleCache ? Date.now() - eligibleCache.at : Infinity;
   if (eligibleCache && age < ELIGIBLE_FRESH_MS) return eligibleCache.rows;
   if (!eligibleRefresh) {
-    eligibleRefresh = discoverEligiblePaymentInvoices()
-      .then((rows) => { eligibleCache = { rows, at: Date.now() }; return rows; })
-      .finally(() => { eligibleRefresh = null; });
-    eligibleRefresh.catch(() => undefined);
+    const generation = eligibleGeneration;
+    const refresh: Promise<EligibleRows> = discoverEligiblePaymentInvoices()
+      // A rebuild that started before the cache was cleared (settings or journeys changed) must not be stored.
+      .then((rows) => { if (generation === eligibleGeneration) eligibleCache = { rows, at: Date.now() }; return rows; })
+      .finally(() => { if (eligibleRefresh === refresh) eligibleRefresh = null; });
+    eligibleRefresh = refresh;
+    refresh.catch(() => undefined);
   }
   // A slightly old list is shown at once while a new one is built in the background.
   if (eligibleCache && age < ELIGIBLE_STALE_MS) return eligibleCache.rows;
   return eligibleRefresh;
 }
 
-export function clearEligiblePaymentCache() { eligibleCache = null; }
+export function clearEligiblePaymentCache() {
+  eligibleCache = null;
+  eligibleGeneration += 1;
+  eligibleRefresh = null; // the next caller starts a fresh rebuild instead of joining an outdated one
+}
 
 export async function startManualPaymentJourney(number: string, input: z.infer<typeof startJourneySchema>, username: string) {
   if (env.PAYMENT_JOURNEY_MODE !== 'manual' || !isPaymentFollowUpSchedulerConfigured || !isMsg91Configured || !env.PAYMENT_FOLLOW_UP_ENABLED || !env.PAYMENT_FOLLOW_UP_SEND_ENABLED || !env.MSG91_SEND_ENABLED) throw new HttpError(409, 'Manual payment reminder sending is not enabled on the server');
