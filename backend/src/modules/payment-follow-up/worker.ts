@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { enqueueMarketingCopy } from '../invoice-delivery/marketing-copies.js';
-import { digitsOnly, env, isPaymentFollowUpSchedulerConfigured } from '../../config/env.js';
+import { digitsOnly, env, isPaymentFollowUpSchedulerConfigured, isPaymentManualProductionAllowed } from '../../config/env.js';
 import {
   buildMsg91PaymentReminderPayload,
   sanitizeMsg91Payload,
@@ -69,12 +69,14 @@ export async function processPaymentFollowUpQueue(): Promise<void> {
 async function processClaimedPaymentJob(
   job: NonNullable<Awaited<ReturnType<typeof claimNextCommunicationJob>>>,
 ): Promise<void> {
-  if (!isPaymentFollowUpSchedulerConfigured || env.DELIVERY_MODE !== 'test') {
+  if (!isPaymentFollowUpSchedulerConfigured || (env.DELIVERY_MODE !== 'test' && !isPaymentManualProductionAllowed)) {
     throw new Error('Payment follow-up worker is disabled outside controlled test mode');
   }
   const context = await getDeliveryJobContext(job);
   const recipient = digitsOnly(String(context.metadata.actual_recipient ?? ''));
   const manual = context.metadata.manual_payment_journey === true;
+  // On the live deployment only a manual journey may send; the old test-recipient reminders never do.
+  if (!manual && env.DELIVERY_MODE !== 'test') throw new Error('Only manual payment journeys can send in production');
   if (!manual) assertAllowedPaymentRecipient(recipient);
   const assertApproved = async () => {
     if (manual) {

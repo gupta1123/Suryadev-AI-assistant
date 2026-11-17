@@ -5,6 +5,7 @@ import {
   env,
   isAllowedPaymentRecipient,
   isPaymentFollowUpTestConfigured,
+  isPaymentManualProductionAllowed,
   paymentTestRecipients,
 } from '../../config/env.js';
 import { HttpError } from '../../lib/http.js';
@@ -1117,6 +1118,7 @@ export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleRe
   const approvedRecipient = String(receivableMetadata.approved_recipient ?? '').replace(/\D/g, '');
   const manual = receivableMetadata.manual_payment_journey === true;
   const isSimulatedPaymentTest = receivableMetadata.invoice_source === 'fixture';
+  if (!manual && env.DELIVERY_MODE !== 'test') throw new Error('Only manual payment journeys can be scheduled in production');
   if (!manual && !isAllowedPaymentRecipient(approvedRecipient)) {
     throw new Error('Controlled payment schedule refused a case outside the approved test boundary');
   }
@@ -1305,6 +1307,7 @@ export async function enqueueNextDuePaymentReminder(): Promise<PaymentScheduleRe
 }
 
 function assertLocalPaymentSchedulerBoundary(): void {
+  if (isPaymentManualProductionAllowed) return;
   if (
     (paymentTestRecipients.size === 0 && env.PAYMENT_JOURNEY_MODE !== 'manual') ||
     (env.NODE_ENV === 'production' && !env.PAYMENT_TEST_DEPLOYMENT_ENABLED) ||

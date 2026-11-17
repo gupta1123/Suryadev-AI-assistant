@@ -75,6 +75,8 @@ const envSchema = z.object({
   PAYMENT_JOURNEY_MODE: z.enum(['manual', 'legacy_test']).default('manual'),
   PAYMENT_FOLLOW_UP_SEND_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   PAYMENT_TEST_DEPLOYMENT_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+  // Lets manual payment journeys run on the production deployment. Off unless set; see isPaymentManualProductionAllowed.
+  PAYMENT_PRODUCTION_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   PAYMENT_SIMULATION_AUTO_FOLLOW_UP: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   PAYMENT_RECEIVABLE_SOURCE: z.enum(['test_fixture', 'sap']).default('test_fixture'),
   PAYMENT_TEST_RECIPIENT: z.string().default(''),
@@ -263,11 +265,26 @@ export const isPaymentFollowUpTestConfigured = Boolean(
     paymentTestRecipients.size > 0,
 );
 
+/**
+ * Manual payment journeys on the live deployment. Every one of these must hold, and it only ever covers
+ * journeys a person (or the automatic start) began from Payment follow-up: the old test-recipient paths
+ * stay closed whenever DELIVERY_MODE is production.
+ */
+export const isPaymentManualProductionAllowed = Boolean(
+  env.DELIVERY_MODE === 'production' &&
+    env.PAYMENT_PRODUCTION_ENABLED &&
+    env.PAYMENT_JOURNEY_MODE === 'manual' &&
+    env.PAYMENT_FOLLOW_UP_ENABLED &&
+    env.PAYMENT_FOLLOW_UP_SEND_ENABLED &&
+    env.MSG91_SEND_ENABLED,
+);
+
 export const isPaymentFollowUpSchedulerConfigured = Boolean(
-  isPaymentFollowUpRuntimeAllowed &&
+  isPaymentManualProductionAllowed ||
+  (isPaymentFollowUpRuntimeAllowed &&
     env.DELIVERY_MODE === 'test' &&
     env.PAYMENT_FOLLOW_UP_ENABLED &&
     env.PAYMENT_RECEIVABLE_SOURCE === 'test_fixture' &&
     (env.PAYMENT_JOURNEY_MODE === 'manual' || (paymentTestRecipients.size > 0 &&
-    (env.PAYMENT_SIMULATION_AUTO_FOLLOW_UP || isPaymentFollowUpTestConfigured))),
+    (env.PAYMENT_SIMULATION_AUTO_FOLLOW_UP || isPaymentFollowUpTestConfigured)))),
 );
